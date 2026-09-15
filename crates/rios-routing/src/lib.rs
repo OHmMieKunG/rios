@@ -14,3 +14,6 @@ mod ospf_exchange;
 pub use ospf_exchange::*;
 
 mod lsa_checksum;
+
+mod ospfv3;
+pub use ospfv3::*;

@@ -5,5 +5,6 @@ edition = "2024"
 
 [dependencies]
 rios-ipv4.workspace = true
+rios-ipv6.workspace = true
 rios-simulator.workspace = true
 thiserror.workspace = true
