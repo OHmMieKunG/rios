@@ -160,6 +160,9 @@ impl OspfPacket {
                 }
                 let count = usize::try_from(u32::from_be_bytes(body[0..4].try_into().unwrap()))
                     .map_err(|_| OspfPacketError::Malformed)?;
+                if count > (body.len() - 4) / 12 {
+                    return Err(OspfPacketError::Malformed);
+                }
                 let mut offset = 4;
                 let mut lsas = Vec::with_capacity(count);
                 for _ in 0..count {

@@ -3,3 +3,6 @@
 
 mod ospf;
 pub use ospf::*;
+
+mod ospf_wire;
+pub use ospf_wire::*;
