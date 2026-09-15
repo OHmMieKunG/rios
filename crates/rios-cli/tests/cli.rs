@@ -703,3 +703,62 @@ fn dot1q_subinterface_configuration_replays_and_checks_duplicates() {
     }
     assert!(run(&mut router, &mut session, "int gi0/99.10").is_err());
 }
+
+#[test]
+fn named_and_numbered_extended_acls_parse_help_replay_and_delete() {
+    use rios_config::{AclEntry, AclKind, AclProtocol, PortMatch};
+    let mut router = Device::standalone();
+    let mut session = CliSession {
+        mode: CliMode::GlobalConfiguration,
+    };
+    for line in [
+        "ip access-list ext WEB-IN",
+        "5 remark inbound service policy",
+        "10 permit tcp 10.10.0.0 0.0.255.255 host 192.168.1.10 eq 443",
+        "20 permit icmp any any",
+        "30 deny ip any any log",
+    ] {
+        run(&mut router, &mut session, line).unwrap();
+    }
+    assert_eq!(session.prompt(router.hostname()), "R1(config-ext-nacl)# ");
+    let ParsedInput::Help(help) =
+        parse("40 permit tcp any host 192.0.2.1 ?", session.mode).unwrap()
+    else {
+        panic!()
+    };
+    for word in ["eq", "range", "log", "<cr>"] {
+        assert!(help.contains(word));
+    }
+    run(&mut router, &mut session, "no 20").unwrap();
+    assert!(
+        !router.running_config().named_access_lists[&router.acl_id("WEB-IN").unwrap()]
+            .entries
+            .contains_key(&20)
+    );
+    for line in [
+        "exit",
+        "int gi0/0",
+        "ip access-group WEB-IN in",
+        "exit",
+        "access-list 101 permit udp any range 1000 2000 any eq 53",
+    ] {
+        run(&mut router, &mut session, line).unwrap();
+    }
+    let extended = &router.running_config().named_access_lists[&router.acl_id("101").unwrap()];
+    assert_eq!(extended.kind, AclKind::Extended);
+    assert!(matches!(
+        extended.entries[&10],
+        AclEntry::Rule {
+            protocol: AclProtocol::Udp,
+            source_port: PortMatch::Range(1000, 2000),
+            destination_port: PortMatch::Eq(53),
+            ..
+        }
+    ));
+    let mut restored = Device::standalone();
+    load_configuration(&mut restored, &router.running_config().render()).unwrap();
+    assert_eq!(restored, router);
+    run(&mut router, &mut session, "ip access-list extended WEB-IN").unwrap();
+    assert!(parse("40 permit tcp any any range 2000 1000", session.mode).is_err());
+    assert!(parse("40 permit ip any any eq 80", session.mode).is_err());
+}

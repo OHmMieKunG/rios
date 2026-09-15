@@ -5,6 +5,7 @@ mod dhcp;
 mod display;
 mod ethernet;
 mod named_acl;
+pub use named_acl::AclLog;
 mod nat;
 mod network;
 mod ospf;
@@ -115,6 +116,8 @@ pub struct Interface {
 pub struct Device {
     acl_matches: BTreeMap<(rios_config::AclId, u32), u64>,
     acl_logs: BTreeMap<(rios_config::AclId, u32), u64>,
+    acl_log_records: std::collections::VecDeque<AclLog>,
+    legacy_acl_matches: BTreeMap<(AccessListId, usize), u64>,
     id: DeviceId,
     device_type: DeviceType,
     interfaces: BTreeMap<InterfaceId, Interface>,
@@ -254,6 +257,8 @@ impl Device {
         Ok(Self {
             acl_matches: BTreeMap::new(),
             acl_logs: BTreeMap::new(),
+            acl_log_records: Default::default(),
+            legacy_acl_matches: BTreeMap::new(),
             id,
             device_type,
             interfaces: BTreeMap::new(),

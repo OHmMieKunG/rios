@@ -263,3 +263,21 @@ The integration fixture `examples/router-on-a-stick.yaml` covers tagged/native
 routing, subinterface ACLs, shutdown, ARP, and OSPF on the shared physical link.
 Public behavioral reference:
 [Catalyst subinterfaces](https://www.cisco.com/c/en/us/td/docs/switches/lan/catalyst9300/software/release/26-x/configuration_guide/vlan/b_26x_vlan_9300_cg/configuring_layer_3_subinterfaces.html).
+
+## Named and extended access lists
+
+`ip access-list standard|extended <name-or-number>` selects a sequenced ACL.
+Entries accept optional sequence numbers, `permit`, `deny`, and `remark`;
+`no <sequence>` removes an entry. Extended rules match `ip`, `icmp`, `tcp`, or
+`udp`, source and destination wildcards, and numeric transport port operators
+`eq`, `range`, `lt`, `gt`, and `neq`. Source and destination port tests are
+independent. Interface `ip access-group <name-or-number> in|out` applies the
+same policy pipeline used by legacy numbered standard lists. Numeric extended
+ACLs also support `access-list <number> permit|deny ...`.
+
+First matching rule wins; remarks do not match and every list has implicit deny.
+`show access-lists` displays match counters. `log` records matching packet metadata
+in a bounded 256-entry device buffer (`take_acl_logs`), with cumulative per-rule
+log counts. Lists and entries are capped at 4096 each. Editing an entry resets its
+counters. Legacy standard lists retain their serialized representation until
+selected through named-list configuration, which promotes their existing rules.

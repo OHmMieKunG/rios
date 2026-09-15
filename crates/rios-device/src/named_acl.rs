@@ -5,6 +5,17 @@ use rios_config::{
 };
 use rios_ipv4::Ipv4Packet;
 
+/// Bounded observation of a packet matching an ACL rule with `log` enabled.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AclLog {
+    pub list: AclId,
+    pub sequence: u32,
+    pub action: AccessListAction,
+    pub source: std::net::Ipv4Addr,
+    pub destination: std::net::Ipv4Addr,
+    pub protocol: u8,
+}
+
 impl Device {
     /// Resolve a named or extended numbered access list.
     pub fn acl_id(&self, name: &str) -> Option<AclId> {
@@ -188,6 +199,11 @@ impl Device {
     pub fn acl_match_count(&self, id: AclId, sequence: u32) -> u64 {
         self.acl_matches.get(&(id, sequence)).copied().unwrap_or(0)
     }
+    /// Drain the most recent 256 logged rule matches without affecting forwarding.
+    pub fn take_acl_logs(&mut self) -> Vec<AclLog> {
+        self.acl_log_records.drain(..).collect()
+    }
+
     pub(crate) fn evaluate_named_acl(&mut self, id: AclId, packet: &Ipv4Packet) -> bool {
         let found = self
             .running_config
@@ -210,6 +226,17 @@ impl Device {
         let count = self.acl_matches.entry((id, sequence)).or_default();
         *count = count.saturating_add(1);
         if log {
+            if self.acl_log_records.len() >= 256 {
+                self.acl_log_records.pop_front();
+            }
+            self.acl_log_records.push_back(AclLog {
+                list: id,
+                sequence,
+                action,
+                source: packet.source,
+                destination: packet.destination,
+                protocol: packet.protocol.into(),
+            });
             let count = self.acl_logs.entry((id, sequence)).or_default();
             *count = count.saturating_add(1);
         }

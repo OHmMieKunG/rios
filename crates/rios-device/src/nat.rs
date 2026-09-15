@@ -52,7 +52,8 @@ impl Device {
         if self.device_type != DeviceType::Router {
             return Err(DeviceError::NatUnsupported);
         }
-        if !self.running_config.access_lists.contains_key(&access_list)
+        if (!self.running_config.access_lists.contains_key(&access_list)
+            && self.acl_id(&access_list.get().to_string()).is_none())
             || !self
                 .running_config
                 .interfaces

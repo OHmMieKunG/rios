@@ -33,6 +33,7 @@ pub enum CliMode {
     VlanConfiguration(VlanId),
     RouterConfiguration(RoutingProtocol),
     DhcpPoolConfiguration(DhcpPoolId),
+    AccessListConfiguration(rios_config::AclId, rios_config::AclKind),
 }
 /// Independent CLI session. Multiple sessions may reference the same device.
 #[derive(Debug, Clone, Default)]
@@ -52,6 +53,13 @@ impl CliSession {
             CliMode::VlanConfiguration(_) => "(config-vlan)#",
             CliMode::RouterConfiguration(_) => "(config-router)#",
             CliMode::DhcpPoolConfiguration(_) => "(dhcp-config)#",
+            CliMode::AccessListConfiguration(_, kind) => {
+                if kind == rios_config::AclKind::Standard {
+                    "(config-std-nacl)#"
+                } else {
+                    "(config-ext-nacl)#"
+                }
+            }
         };
         format!("{hostname}{suffix} ")
     }
@@ -66,6 +74,7 @@ impl CliSession {
                 | CliMode::VlanConfiguration(_)
                 | CliMode::RouterConfiguration(_)
                 | CliMode::DhcpPoolConfiguration(_)
+                | CliMode::AccessListConfiguration(_, _)
         ) {
             self.mode = CliMode::PrivilegedExec;
         }
@@ -81,6 +90,24 @@ pub enum NetworkFeature {
 /// Validated syntax, independent of state mutation and terminal I/O.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
+    EnterAccessList {
+        name: String,
+        kind: rios_config::AclKind,
+    },
+    AddAclEntry {
+        sequence: Option<u32>,
+        entry: rios_config::AclEntry,
+    },
+    RemoveAclEntry(u32),
+    SetNamedAccessGroup {
+        name: String,
+        direction: AccessListDirection,
+    },
+    AddNumberedAcl {
+        name: String,
+        kind: rios_config::AclKind,
+        entry: rios_config::AclEntry,
+    },
     Enable,
     Disable,
     ConfigureTerminal,

@@ -98,6 +98,7 @@ pub fn execute_at(
             | VlanConfiguration(_)
             | RouterConfiguration(_)
             | DhcpPoolConfiguration(_)
+            | AccessListConfiguration(_, _)
     );
     let valid = match &command {
         Command::Enable => mode == UserExec,
@@ -106,7 +107,16 @@ pub fn execute_at(
         | Command::ShowRunningConfig
         | Command::ShowStartupConfig
         | Command::SaveConfig => mode == PrivilegedExec,
-        Command::Hostname(_) => mode == GlobalConfiguration,
+        Command::Hostname(_) | Command::EnterAccessList { .. } | Command::AddNumberedAcl { .. } => {
+            mode == GlobalConfiguration
+        }
+        Command::AddAclEntry { .. } | Command::RemoveAclEntry(_) => {
+            matches!(mode, AccessListConfiguration(_, _))
+        }
+        Command::SetNamedAccessGroup { .. } => matches!(
+            mode,
+            InterfaceConfiguration(_) | SubinterfaceConfiguration(_)
+        ),
         Command::IpRouting
         | Command::NoIpRouting
         | Command::SetStaticRoute { .. }
@@ -182,6 +192,30 @@ pub fn execute_at(
     }
     let mut result = Execution::default();
     match command {
+        Command::EnterAccessList { name, kind } => {
+            session.mode = AccessListConfiguration(device.ensure_acl(&name, kind)?, kind);
+        }
+        Command::AddAclEntry { sequence, entry } => {
+            if let AccessListConfiguration(id, _) = mode {
+                device.set_acl_entry(id, sequence, entry)?;
+            }
+        }
+        Command::RemoveAclEntry(sequence) => {
+            if let AccessListConfiguration(id, _) = mode {
+                device.remove_acl_entry(id, sequence)?;
+            }
+        }
+        Command::SetNamedAccessGroup { name, direction } => {
+            if let InterfaceConfiguration(id) | SubinterfaceConfiguration(id) = mode {
+                device.set_named_access_group(id, &name, direction)?;
+            }
+        }
+        Command::AddNumberedAcl { name, kind, entry } => {
+            let mut candidate = device.clone();
+            let id = candidate.ensure_acl(&name, kind)?;
+            candidate.set_acl_entry(id, None, entry)?;
+            *device = candidate;
+        }
         Command::Enable => session.mode = PrivilegedExec,
         Command::Disable => session.mode = UserExec,
         Command::ConfigureTerminal => session.mode = GlobalConfiguration,
@@ -375,7 +409,8 @@ pub fn execute_at(
             | InterfaceRangeConfiguration(_, _)
             | VlanConfiguration(_)
             | RouterConfiguration(_)
-            | DhcpPoolConfiguration(_) => session.mode = GlobalConfiguration,
+            | DhcpPoolConfiguration(_)
+            | AccessListConfiguration(_, _) => session.mode = GlobalConfiguration,
         },
     }
     Ok(result)
@@ -406,6 +441,7 @@ pub fn load_configuration(device: &mut Device, text: &str) -> Result<(), CliErro
                 | CliMode::VlanConfiguration(_)
                 | CliMode::RouterConfiguration(_)
                 | CliMode::DhcpPoolConfiguration(_)
+                | CliMode::AccessListConfiguration(_, _)
         ) {
             return Err(fail("commands after end are not allowed".into()));
         }
@@ -420,6 +456,7 @@ pub fn load_configuration(device: &mut Device, text: &str) -> Result<(), CliErro
                         | CliMode::VlanConfiguration(_)
                         | CliMode::RouterConfiguration(_)
                         | CliMode::DhcpPoolConfiguration(_)
+                        | CliMode::AccessListConfiguration(_, _)
                 ) {
                     crate::parser::parse_configuration(line, CliMode::GlobalConfiguration)
                         .map(|parsed| (parsed, CliMode::GlobalConfiguration))

@@ -16,6 +16,12 @@ pub(crate) enum Action {
     StaticRoute,
     NoStaticRoute,
     AccessList,
+    NamedStandardAcl,
+    NamedExtendedAcl,
+    AclPermit,
+    AclDeny,
+    AclRemark,
+    NoAclSequence,
     AccessGroup,
     DhcpPool,
     DhcpNetwork,
@@ -66,7 +72,8 @@ pub(crate) enum Action {
 impl Action {
     pub fn argument_help(self) -> &'static [&'static str] {
         match self {
-            Self::Hostname => &["<name>"],
+            Self::Hostname | Self::NamedStandardAcl | Self::NamedExtendedAcl => &["<name>"],
+            Self::NoAclSequence => &["<sequence>"],
             Self::Interface => &[
                 "range",
                 "GigabitEthernet",
@@ -276,7 +283,8 @@ pub(crate) fn tree(mode: CliMode) -> Node {
         | CliMode::InterfaceRangeConfiguration(_, _)
         | CliMode::VlanConfiguration(_)
         | CliMode::RouterConfiguration(_)
-        | CliMode::DhcpPoolConfiguration(_) => {
+        | CliMode::DhcpPoolConfiguration(_)
+        | CliMode::AccessListConfiguration(_, _) => {
             root.add(&[("end", "Return to privileged EXEC")], End);
             root.add(&[("do", "Execute an EXEC command")], Do);
             root.add(&[("interface", "Select an interface")], Interface);
@@ -286,7 +294,29 @@ pub(crate) fn tree(mode: CliMode) -> Node {
             ) {
                 root.add(&[("vlan", "Configure a VLAN")], Vlan);
             }
+            if matches!(mode, CliMode::AccessListConfiguration(_, _)) {
+                root.add(&[("permit", "Permit matching packets")], AclPermit);
+                root.add(&[("deny", "Deny matching packets")], AclDeny);
+                root.add(&[("remark", "Access-list comment")], AclRemark);
+                root.add(&[("no", "Remove sequence")], NoAclSequence);
+            }
             if mode == CliMode::GlobalConfiguration {
+                root.add(
+                    &[
+                        ("ip", "IP configuration"),
+                        ("access-list", "Named IPv4 access list"),
+                        ("standard", "Match source address"),
+                    ],
+                    NamedStandardAcl,
+                );
+                root.add(
+                    &[
+                        ("ip", "IP configuration"),
+                        ("access-list", "Named IPv4 access list"),
+                        ("extended", "Match protocol, addresses, and ports"),
+                    ],
+                    NamedExtendedAcl,
+                );
                 root.add(&[("hostname", "Set device hostname")], Hostname);
                 root.add(
                     &[("ip", "IP configuration"), ("routing", "Enable IP routing")],

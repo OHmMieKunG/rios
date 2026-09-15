@@ -1,3 +1,4 @@
+mod acl;
 use crate::{
     tree::{Action, Node, tree},
     *,
@@ -125,6 +126,26 @@ fn parse_input(
     if words.is_empty() {
         return Ok(ParsedInput::Empty);
     }
+    if matches!(mode, CliMode::AccessListConfiguration(_, _))
+        && words[0].text.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        let sequence = words[0]
+            .text
+            .parse::<u32>()
+            .ok()
+            .filter(|value| *value > 0 && *value < u32::MAX)
+            .ok_or_else(|| invalid(words[0].offset, "invalid sequence"))?;
+        let offset = words.get(1).ok_or(ParseError::Incomplete)?.offset;
+        let parsed = parse_input(&input[offset..], mode, false)
+            .map_err(|error| shift_error(error, offset, input))?;
+        let ParsedInput::Command(Command::AddAclEntry { entry, .. }) = parsed else {
+            return Err(invalid(offset, "expected permit, deny, or remark"));
+        };
+        return Ok(ParsedInput::Command(Command::AddAclEntry {
+            sequence: Some(sequence),
+            entry,
+        }));
+    }
     let root = tree(mode);
     let mut node = &root;
     let mut index = 0;
@@ -159,7 +180,12 @@ fn parse_input(
         | Action::DhcpDefaultRouter => 1,
         Action::RouterOspf => 1,
         Action::OspfNetwork => 4,
-        Action::Interface | Action::Description => usize::MAX,
+        Action::Interface
+        | Action::Description
+        | Action::AclPermit
+        | Action::AclDeny
+        | Action::AclRemark => usize::MAX,
+        Action::NamedStandardAcl | Action::NamedExtendedAcl | Action::NoAclSequence => 1,
         _ => 0,
     };
     if expected > 0 && args.is_empty() || expected != usize::MAX && args.len() < expected {
@@ -183,6 +209,41 @@ fn parse_input(
     };
     use Action::*;
     let command = match action {
+        NamedStandardAcl | NamedExtendedAcl => Command::EnterAccessList {
+            name: args[0].text.into(),
+            kind: if matches!(action, NamedStandardAcl) {
+                rios_config::AclKind::Standard
+            } else {
+                rios_config::AclKind::Extended
+            },
+        },
+        NoAclSequence => Command::RemoveAclEntry(
+            args[0]
+                .text
+                .parse::<u32>()
+                .map_err(|_| invalid(args[0].offset, "expected sequence number"))?,
+        ),
+        AclPermit | AclDeny => {
+            let CliMode::AccessListConfiguration(_, kind) = mode else {
+                return Err(invalid(0, "not in ACL configuration mode"));
+            };
+            Command::AddAclEntry {
+                sequence: None,
+                entry: acl::parse_entry(
+                    args,
+                    kind,
+                    if matches!(action, AclPermit) {
+                        AccessListAction::Permit
+                    } else {
+                        AccessListAction::Deny
+                    },
+                )?,
+            }
+        }
+        AclRemark => Command::AddAclEntry {
+            sequence: None,
+            entry: rios_config::AclEntry::Remark(input[args[0].offset..].trim_end().into()),
+        },
         Enable => Command::Enable,
         Disable => Command::Disable,
         Configure => Command::ConfigureTerminal,
@@ -303,6 +364,33 @@ fn parse_input(
             if args.len() < 3 {
                 return Err(ParseError::Incomplete);
             }
+            if parse_access_list_id(&args[0]).is_err() {
+                let number = args[0]
+                    .text
+                    .parse::<u16>()
+                    .map_err(|_| invalid(args[0].offset, "expected ACL number"))?;
+                let kind = if (100..=199).contains(&number) || (2000..=2699).contains(&number) {
+                    rios_config::AclKind::Extended
+                } else if (1300..=1999).contains(&number) {
+                    rios_config::AclKind::Standard
+                } else {
+                    return Err(invalid(args[0].offset, "invalid ACL number"));
+                };
+                let action = unique_choice(&args[1], &["permit", "deny"])?;
+                return Ok(ParsedInput::Command(Command::AddNumberedAcl {
+                    name: number.to_string(),
+                    kind,
+                    entry: acl::parse_entry(
+                        &args[2..],
+                        kind,
+                        if action == "permit" {
+                            AccessListAction::Permit
+                        } else {
+                            AccessListAction::Deny
+                        },
+                    )?,
+                }));
+            }
             let id = parse_access_list_id(&args[0])?;
             let action = unique_choice(&args[1], &["permit", "deny"])?;
             let (source, wildcard) = match args[2].text.to_ascii_lowercase().as_str() {
@@ -327,13 +415,19 @@ fn parse_input(
                 },
             }
         }
-        AccessGroup => Command::SetAccessGroup {
-            id: parse_access_list_id(&args[0])?,
-            direction: match unique_choice(&args[1], &["in", "out"])? {
+        AccessGroup => {
+            let direction = match unique_choice(&args[1], &["in", "out"])? {
                 "in" => AccessListDirection::In,
                 _ => AccessListDirection::Out,
-            },
-        },
+            };
+            match parse_access_list_id(&args[0]) {
+                Ok(id) => Command::SetAccessGroup { id, direction },
+                Err(_) => Command::SetNamedAccessGroup {
+                    name: args[0].text.into(),
+                    direction,
+                },
+            }
+        }
         DhcpPool => Command::EnterDhcpPool(args[0].text.into()),
         DhcpNetwork => {
             let address = parse_ip(0)?;
@@ -444,6 +538,14 @@ fn parse_input(
     Ok(ParsedInput::Command(command))
 }
 
+fn shift_error(error: ParseError, base: usize, input: &str) -> ParseError {
+    match error {
+        ParseError::Invalid { offset, reason } => invalid(offset + base, reason),
+        ParseError::Ambiguous(_) => ParseError::Ambiguous(input.into()),
+        other => other,
+    }
+}
+
 fn parse_interface_range(value: &str, offset: usize) -> Result<(String, String), ParseError> {
     let (first, last) = value
         .split_once('-')
@@ -534,6 +636,19 @@ pub fn suggestions(
             words.last().unwrap().offset,
         )
     };
+    if matches!(mode, CliMode::AccessListConfiguration(_, _))
+        && complete
+            .first()
+            .is_some_and(|token| token.text.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        let offset = words.get(1).map_or(input.len(), |token| token.offset);
+        let mut result = suggestions(&input[offset..], mode, interfaces)
+            .map_err(|error| shift_error(error, offset, input))?;
+        for item in &mut result {
+            item.start += offset;
+        }
+        return Ok(result);
+    }
     let root = tree(mode);
     let mut node = &root;
     let mut used = 0;
@@ -578,6 +693,28 @@ pub fn suggestions(
     }
     if let Some(action) = node.action {
         let args = &complete[used..];
+        if matches!(action, Action::AclPermit | Action::AclDeny) {
+            let CliMode::AccessListConfiguration(_, kind) = mode else {
+                return Err(invalid(0, "not in ACL mode"));
+            };
+            let choices = match acl::entry(args, kind, AccessListAction::Permit, true) {
+                Ok(_) => &["<cr>"][..],
+                Err(acl::RuleError::Need(choices)) => choices,
+                Err(acl::RuleError::Invalid(error)) => return Err(error),
+            };
+            return Ok(choices
+                .iter()
+                .filter(|word| {
+                    word.starts_with('<') || word.starts_with(&partial.to_ascii_lowercase())
+                })
+                .map(|word| Suggestion {
+                    word: (*word).into(),
+                    help: String::new(),
+                    start,
+                })
+                .collect());
+        }
+
         if matches!(action, Action::Interface) {
             if args.is_empty() {
                 for family in action.argument_help() {
@@ -725,6 +862,12 @@ pub fn suggestions(
                 Action::NatOverload if args.len() == 2 => "interface",
                 Action::NatOverload if args.len() == 3 => "<interface>",
                 Action::NatOverload if args.len() == 4 => "overload",
+                Action::NamedStandardAcl | Action::NamedExtendedAcl | Action::NoAclSequence
+                    if args.is_empty() =>
+                {
+                    action.argument_help()[0]
+                }
+                Action::AclRemark if args.is_empty() => "<text>",
                 Action::Hostname
                 | Action::Ping
                 | Action::Vlan
@@ -746,7 +889,8 @@ pub fn suggestions(
             };
             if help == "<cr>" {
                 parse_configuration(input[..start].trim_end(), mode)?;
-                if !partial.is_empty() && !matches!(action, Action::Description) {
+                if !partial.is_empty() && !matches!(action, Action::Description | Action::AclRemark)
+                {
                     return Err(invalid(start, "unexpected argument"));
                 }
             }

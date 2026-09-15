@@ -13,6 +13,32 @@ impl Device {
         if !self.supports_routing() {
             return Err(DeviceError::AccessListUnsupported);
         }
+        if let Some(named) = self.acl_id(&id.get().to_string()) {
+            return self.set_acl_entry(
+                named,
+                None,
+                rios_config::AclEntry::Rule {
+                    action: entry.action,
+                    protocol: rios_config::AclProtocol::Ip,
+                    source: rios_config::AddressMatch {
+                        address: entry.source,
+                        wildcard: entry.wildcard,
+                    },
+                    source_port: rios_config::PortMatch::Any,
+                    destination: rios_config::AddressMatch::ANY,
+                    destination_port: rios_config::PortMatch::Any,
+                    log: false,
+                },
+            );
+        }
+        if self
+            .running_config
+            .access_lists
+            .get(&id)
+            .is_some_and(|entries| entries.len() >= 4096)
+        {
+            return Err(DeviceError::AccessListCapacity);
+        }
         self.running_config
             .access_lists
             .entry(id)
@@ -78,7 +104,24 @@ impl Device {
         if let Some(named) = self.acl_id(&id.get().to_string()) {
             return self.evaluate_named_acl(named, packet);
         }
-        self.access_list_permits(id, packet.source)
+        let matched = self
+            .running_config
+            .access_lists
+            .get(&id)
+            .and_then(|entries| {
+                entries
+                    .iter()
+                    .enumerate()
+                    .find(|(_, entry)| entry.matches(packet.source))
+            });
+        if let Some((index, entry)) = matched {
+            let action = entry.action;
+            let counter = self.legacy_acl_matches.entry((id, index)).or_default();
+            *counter = counter.saturating_add(1);
+            action == AccessListAction::Permit
+        } else {
+            false
+        }
     }
 
     /// Evaluate a configured standard ACL against one source address.
@@ -109,16 +152,20 @@ impl Device {
         let mut output = String::new();
         for (id, entries) in &self.running_config.access_lists {
             writeln!(output, "Standard IP access list {}", id.get()).unwrap();
-            for entry in entries {
+            for (index, entry) in entries.iter().enumerate() {
                 writeln!(
                     output,
-                    "    {} {} {}",
+                    "    {} {} {} ({} matches)",
                     match entry.action {
                         AccessListAction::Permit => "permit",
                         AccessListAction::Deny => "deny",
                     },
                     entry.source,
-                    entry.wildcard
+                    entry.wildcard,
+                    self.legacy_acl_matches
+                        .get(&(*id, index))
+                        .copied()
+                        .unwrap_or(0)
                 )
                 .unwrap();
             }

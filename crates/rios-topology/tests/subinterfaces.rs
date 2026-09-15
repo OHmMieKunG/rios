@@ -186,3 +186,76 @@ fn ospf_and_router_originated_ping_use_subinterface_identity() {
         5
     );
 }
+
+#[test]
+fn extended_acl_filters_udp_ports_in_actual_routed_frames() {
+    use rios_config::{AclEntry, AclKind, AclProtocol, AddressMatch, PortMatch};
+    use rios_ethernet::EthernetFrame;
+    use rios_ipv4::{IpProtocol, Ipv4Packet};
+    use rios_protocol::UdpDatagram;
+    use rios_topology::EventOutcome;
+    let mut lab = setup();
+    let source = lab.endpoint("H10:gi0/0").unwrap();
+    let target = lab.endpoint("H20:gi0/0").unwrap();
+    let router = lab.endpoint("R1:gi0/0").unwrap();
+    let acl = lab
+        .with_device_mut(router.device, |device| {
+            let acl = device.ensure_acl("DNS", AclKind::Extended).unwrap();
+            device
+                .set_acl_entry(
+                    acl,
+                    Some(10),
+                    AclEntry::Rule {
+                        action: AccessListAction::Permit,
+                        protocol: AclProtocol::Udp,
+                        source: AddressMatch::ANY,
+                        source_port: PortMatch::Range(1000, 2000),
+                        destination: AddressMatch::ANY,
+                        destination_port: PortMatch::Eq(53),
+                        log: true,
+                    },
+                )
+                .unwrap();
+            let id = device.ensure_interface("gi0/0.10").unwrap();
+            device
+                .set_named_access_group(id, "DNS", AccessListDirection::In)
+                .unwrap();
+            acl
+        })
+        .unwrap();
+    for (port, expected) in [(53, true), (80, false)] {
+        let packet = Ipv4Packet {
+            source: "10.10.10.10".parse().unwrap(),
+            destination: "10.20.20.20".parse().unwrap(),
+            ttl: 64,
+            protocol: IpProtocol::Udp,
+            payload: UdpDatagram {
+                source_port: 1500,
+                destination_port: port,
+                payload: vec![1, 2, 3],
+            }
+            .encode()
+            .unwrap(),
+        };
+        let frame = EthernetFrame {
+            source: lab.device(source.device).unwrap().interfaces()[&source.interface].mac_address,
+            destination: lab.device(router.device).unwrap().interfaces()[&router.interface]
+                .mac_address,
+            ethertype: EtherType::Ipv4,
+            payload: packet.encode().unwrap(),
+        };
+        lab.transmit(source, frame).unwrap();
+        let outcomes = lab.run_until(SimTime(lab.now().0 + 10_000)).unwrap();
+        let delivered = outcomes.iter().any(|event| matches!(event, EventOutcome::FrameReceived { interface, frame } if *interface == target && frame.ethertype == EtherType::Ipv4));
+        assert_eq!(delivered, expected);
+    }
+    assert_eq!(
+        lab.device(router.device).unwrap().acl_match_count(acl, 10),
+        1
+    );
+    let logs = lab
+        .with_device_mut(router.device, |device| device.take_acl_logs())
+        .unwrap();
+    assert_eq!(logs.len(), 1);
+    assert_eq!(logs[0].destination.to_string(), "10.20.20.20");
+}
