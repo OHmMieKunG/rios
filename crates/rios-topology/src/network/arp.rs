@@ -92,12 +92,10 @@ impl Lab {
         let Ok(packet) = ArpPacket::decode(&frame.payload) else {
             return Ok(());
         };
-        if packet.sender_mac != frame.source
-            || packet.sender_mac.is_multicast()
-            || packet.sender_ip.is_unspecified()
-        {
+        if packet.sender_mac != frame.source || packet.sender_mac.is_multicast() {
             return Ok(());
         }
+        self.observe_dhcp_conflict(interface, &packet)?;
         let now = self.now();
         if !self
             .device(interface.device)?
@@ -111,12 +109,14 @@ impl Lab {
             return Ok(());
         }
         let now = self.now();
-        self.devices.get_mut(&interface.device).unwrap().learn_arp(
-            packet.sender_ip,
-            packet.sender_mac,
-            interface.interface,
-            now,
-        )?;
+        if !packet.sender_ip.is_unspecified() {
+            self.devices.get_mut(&interface.device).unwrap().learn_arp(
+                packet.sender_ip,
+                packet.sender_mac,
+                interface.interface,
+                now,
+            )?;
+        }
         if packet.operation == ArpOperation::Request {
             let local_mac =
                 self.device(interface.device)?.interfaces()[&interface.interface].mac_address;

@@ -1049,7 +1049,7 @@ fn dhcp_assigns_and_expires_a_usable_address_over_a_switch() {
     .unwrap()
     .unwrap();
 
-    lab.run_until(SimTime::from_millis(20)).unwrap();
+    lab.run_until(SimTime::from_millis(500)).unwrap();
     let leased = lab
         .device(client.device)
         .unwrap()
@@ -1091,7 +1091,15 @@ fn dhcp_assigns_and_expires_a_usable_address_over_a_switch() {
         5
     );
 
-    lab.run_until(SimTime::from_millis(3_600_008)).unwrap();
+    // Server outage prevents renewal, so the old lease must expire.
+    enable(&mut lab, router, AdminState::Down);
+    let deadline = lab
+        .device(client_two.device)
+        .unwrap()
+        .dhcp_lease(client_two.interface)
+        .unwrap()
+        .expires_at;
+    lab.run_until(SimTime(deadline.0 + 1)).unwrap();
     assert!(
         lab.device(client.device)
             .unwrap()
@@ -1104,7 +1112,8 @@ fn dhcp_assigns_and_expires_a_usable_address_over_a_switch() {
             .interface_ipv4(client_two.interface)
             .is_none()
     );
-    lab.run_until(SimTime::from_millis(3_600_020)).unwrap();
+    enable(&mut lab, router, AdminState::Up);
+    lab.run_until(SimTime::from_millis(3_605_000)).unwrap();
     assert_eq!(
         lab.device(client.device)
             .unwrap()

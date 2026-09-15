@@ -130,6 +130,7 @@ pub struct Device {
     mac_table: BTreeMap<(VlanId, MacAddress), MacEntry>,
     ospf_runtime: OspfRuntime,
     stp_runtime: BTreeMap<VlanId, StpInstance>,
+    dhcp_conflicts: BTreeMap<std::net::Ipv4Addr, rios_simulator::SimTime>,
     dhcp_leases: BTreeMap<InterfaceId, DhcpLease>,
     dhcp_bindings: BTreeMap<MacAddress, DhcpBinding>,
     dhcp_offers: BTreeMap<MacAddress, DhcpOffer>,
@@ -268,6 +269,7 @@ impl Device {
             device_type,
             interfaces: BTreeMap::new(),
             running_config: RunningConfig {
+                dhcp_excluded: BTreeMap::new(),
                 static_nat: BTreeSet::new(),
                 nat_pools: BTreeMap::new(),
                 nat_pool_rule: None,
@@ -287,6 +289,7 @@ impl Device {
             mac_table: BTreeMap::new(),
             ospf_runtime: OspfRuntime::default(),
             stp_runtime: BTreeMap::new(),
+            dhcp_conflicts: BTreeMap::new(),
             dhcp_leases: BTreeMap::new(),
             dhcp_bindings: BTreeMap::new(),
             dhcp_offers: BTreeMap::new(),
@@ -403,6 +406,7 @@ impl Device {
         self.running_config.interfaces.insert(
             id,
             InterfaceConfig {
+                helper_address: None,
                 named_access_group_in: None,
                 named_access_group_out: None,
                 parent: None,

@@ -72,6 +72,14 @@ pub(crate) enum SimulationEvent {
         device: rios_simulator::DeviceId,
         generation: u64,
     },
+    DhcpProbe {
+        interface: InterfaceRef,
+        xid: u32,
+    },
+    DhcpRenew {
+        interface: InterfaceRef,
+        deadline: SimTime,
+    },
     DhcpLeaseExpired {
         device: rios_simulator::DeviceId,
         interface: rios_simulator::InterfaceId,

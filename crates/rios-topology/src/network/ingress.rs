@@ -39,8 +39,14 @@ impl Lab {
             && let Ok(datagram) = UdpDatagram::decode(&packet.payload)
             && matches!(
                 (datagram.source_port, datagram.destination_port),
-                (DHCP_CLIENT_PORT, DHCP_SERVER_PORT) | (DHCP_SERVER_PORT, DHCP_CLIENT_PORT)
+                (DHCP_CLIENT_PORT, DHCP_SERVER_PORT)
+                    | (DHCP_SERVER_PORT, DHCP_CLIENT_PORT)
+                    | (DHCP_SERVER_PORT, DHCP_SERVER_PORT)
             )
+            && (packet.destination == Ipv4Addr::BROADCAST
+                || self
+                    .device(interface.device)?
+                    .owns_any_ipv4(packet.destination))
         {
             self.handle_dhcp(interface, datagram)?;
             return Ok(());

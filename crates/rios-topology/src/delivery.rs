@@ -301,6 +301,17 @@ impl Lab {
                 self.send_dhcp_discovers(device, generation)?;
                 return Ok(None);
             }
+            SimulationEvent::DhcpProbe { interface, xid } => {
+                self.finish_dhcp_probe(interface, xid)?;
+                return Ok(None);
+            }
+            SimulationEvent::DhcpRenew {
+                interface,
+                deadline,
+            } => {
+                self.renew_dhcp(interface, deadline)?;
+                return Ok(None);
+            }
             SimulationEvent::DhcpLeaseExpired {
                 device,
                 interface,

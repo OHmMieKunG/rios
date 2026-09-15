@@ -323,3 +323,27 @@ rewriting, application gateways, hairpin NAT, and fragmented transport translati
 remain unsupported. Tests cover TCP sessions in both directions through PAT,
 outside-initiated static port forwarding, proxy ARP, ICMP through static/pool NAT,
 pool exhaustion, expiration, and CLI/configuration replay.
+
+### DHCP relay and lease lifecycle
+
+DHCP uses BOOTP `giaddr` and simulated UDP 67/68 for routed relay, following
+[RFC 2131](https://www.rfc-editor.org/rfc/rfc2131). Transit routers forward DHCP
+normally; only local/broadcast destinations enter DHCP processing. Relay replies
+return to the client-facing interface. Clients renew by unicast at T1, broadcast
+to rebind at T2, and remove the address/default route at expiration. Stale timers
+cannot remove renewed leases.
+
+Pools support excluded ranges, minute-granularity leases, DNS/domain options, and
+MAC reservations (`host ADDRESS MASK`, `hardware-address MAC`). Configure relay
+with `ip helper-address SERVER`. An ARP probe checks each offer before REQUEST;
+a conflict generates DECLINE, quarantines the address for ten simulated minutes,
+and delays client retry. Invalid requested addresses receive NAK. Malformed
+packets/options are rejected without stopping the lab.
+
+Tables are bounded (1,024 pools, 8,192 offers/bindings, 4,096 exclusion ranges);
+offers and bindings expire. This implementation supports one helper per interface
+and Ethernet MAC identity. It uses one 200 ms offer probe; full RFC 5227 probing,
+option 82, DHCP authentication, DHCPINFORM, and multiple helper destinations remain
+outside this milestone. Tests cover remote allocation through a transit router,
+options, reservations, NAK, renewal, rebind, expiry, duplicate address detection,
+configuration replay, and malformed packet decoding.

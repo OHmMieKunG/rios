@@ -1,15 +1,21 @@
+//! DHCP address allocation, validated options, and lease state.
 use crate::*;
+mod config;
 use rios_config::{DhcpPoolConfig, DhcpPoolId};
 use rios_ipv4::{Ipv4InterfaceConfig, Ipv4Network};
 use rios_simulator::SimTime;
 use std::{collections::BTreeSet, fmt::Write, net::Ipv4Addr};
 
-const DHCP_LEASE_MS: u64 = 3_600_000;
+const MAX_DHCP_BINDINGS: usize = 8192;
 const DHCP_OFFER_MS: u64 = 60_000;
 
 /// Runtime IPv4 lease installed on a DHCP client interface.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DhcpLease {
+    pub dns_servers: Vec<Ipv4Addr>,
+    pub domain_name: Option<String>,
+    pub renew_at: SimTime,
+    pub rebind_at: SimTime,
     pub address: Ipv4Addr,
     pub prefix_len: u8,
     pub default_router: Option<Ipv4Addr>,
@@ -55,6 +61,9 @@ impl Device {
         {
             return Ok(*id);
         }
+        if self.running_config.dhcp_pools.len() >= 1024 {
+            return Err(DeviceError::InvalidDhcpNetwork);
+        }
         let id = DhcpPoolId(
             self.running_config
                 .dhcp_pools
@@ -64,6 +73,11 @@ impl Device {
         self.running_config.dhcp_pools.insert(
             id,
             DhcpPoolConfig {
+                lease_seconds: 3600,
+                dns_servers: Vec::new(),
+                domain_name: None,
+                reserved_address: None,
+                hardware_address: None,
                 name: name.into(),
                 network: None,
                 default_router: None,
@@ -81,12 +95,14 @@ impl Device {
         if network.prefix_len() > 30 {
             return Err(DeviceError::InvalidDhcpNetwork);
         }
-        self.running_config
+        let mut pool = self
+            .running_config
             .dhcp_pools
-            .get_mut(&id)
+            .get(&id)
             .ok_or(DeviceError::MissingDhcpPool)?
-            .network = Some(network);
-        Ok(())
+            .clone();
+        pool.network = Some(network);
+        self.update_dhcp_pool(id, pool)
     }
 
     /// Set the default-router option for a DHCP pool.
@@ -95,12 +111,14 @@ impl Device {
         id: DhcpPoolId,
         address: Ipv4Addr,
     ) -> Result<(), DeviceError> {
-        self.running_config
+        let mut pool = self
+            .running_config
             .dhcp_pools
-            .get_mut(&id)
+            .get(&id)
             .ok_or(DeviceError::MissingDhcpPool)?
-            .default_router = Some(address);
-        Ok(())
+            .clone();
+        pool.default_router = Some(address);
+        self.update_dhcp_pool(id, pool)
     }
 
     /// Configure an interface as a DHCP client and clear any static or old lease address.
@@ -166,58 +184,125 @@ impl Device {
         client_mac: MacAddress,
         now: SimTime,
     ) -> Option<DhcpOffer> {
+        let subnet = self.interface_ipv4(interface)?.address();
+        self.offer_dhcp_on_network(interface, client_mac, subnet, now)
+    }
+
+    /// Select a pool by relay giaddr (or the directly attached subnet).
+    pub fn offer_dhcp_on_network(
+        &mut self,
+        interface: InterfaceId,
+        client_mac: MacAddress,
+        subnet: Ipv4Addr,
+        now: SimTime,
+    ) -> Option<DhcpOffer> {
         let server_id = self.interface_ipv4(interface)?.address();
         self.expire_dhcp_server_state(now);
-        if let Some(offer) = self.dhcp_offers.get(&client_mac).copied() {
-            return Some(offer);
-        }
-        if let Some(binding) = self.dhcp_bindings.get(&client_mac) {
-            let (pool, config) = self
-                .running_config
-                .dhcp_pools
-                .iter()
-                .find(|(_, pool)| pool.name == binding.pool_name)?;
-            let network = config.network?;
-            return Some(DhcpOffer {
-                address: binding.address,
-                prefix_len: network.prefix_len(),
-                default_router: config.default_router,
-                server_id,
-                lease_time_seconds: (DHCP_LEASE_MS / 1000) as u32,
-                pool: *pool,
-                expires_at: binding.expires_at,
-            });
-        }
-        let (pool_id, pool) = self.running_config.dhcp_pools.iter().find(|(_, pool)| {
-            pool.network
-                .is_some_and(|network| network.contains(server_id))
-        })?;
+        let (pool_id, pool) = self
+            .running_config
+            .dhcp_pools
+            .iter()
+            .filter(|(_, pool)| {
+                pool.network.is_some_and(|network| network.contains(subnet))
+                    && (pool.hardware_address.is_none()
+                        || pool.hardware_address == Some(client_mac))
+                    && (pool.reserved_address.is_none()
+                        || pool.hardware_address == Some(client_mac))
+            })
+            .min_by_key(|(id, pool)| (pool.reserved_address.is_none(), **id))?;
         let pool_id = *pool_id;
         let pool = pool.clone();
         let network = pool.network?;
+        if let Some(offer) = self.dhcp_offers.get(&client_mac).copied()
+            && offer.pool == pool_id
+        {
+            return Some(offer);
+        }
+        let previous = self
+            .dhcp_bindings
+            .get(&client_mac)
+            .filter(|binding| binding.pool_name == pool.name)
+            .map(|binding| binding.address);
+        if self.dhcp_offers.len() + self.dhcp_bindings.len() >= MAX_DHCP_BINDINGS
+            && previous.is_none()
+        {
+            return None;
+        }
         let used: BTreeSet<_> = self
             .dhcp_bindings
-            .values()
-            .map(|binding| binding.address)
-            .chain(self.dhcp_offers.values().map(|offer| offer.address))
+            .iter()
+            .filter(|(mac, _)| **mac != client_mac)
+            .map(|(_, binding)| binding.address)
+            .chain(
+                self.dhcp_offers
+                    .iter()
+                    .filter(|(mac, _)| **mac != client_mac)
+                    .map(|(_, offer)| offer.address),
+            )
             .chain(
                 self.running_config
                     .interfaces
                     .keys()
                     .filter_map(|id| self.interface_ipv4(*id).map(|ip| ip.address())),
             )
+            .chain(
+                self.running_config
+                    .dhcp_pools
+                    .values()
+                    .filter(|pool| pool.hardware_address != Some(client_mac))
+                    .filter_map(|pool| pool.reserved_address),
+            )
+            .chain(self.dhcp_conflicts.keys().copied())
             .collect();
-        let first = u32::from(network.address()).saturating_add(1);
-        let last = u32::from(network.broadcast()).saturating_sub(1);
-        let address = (first..=last)
-            .map(Ipv4Addr::from)
-            .find(|address| !used.contains(address) && pool.default_router != Some(*address))?;
+        let allowed = |address: Ipv4Addr| {
+            network.contains(address)
+                && address != network.address()
+                && address != network.broadcast()
+                && !used.contains(&address)
+                && pool.default_router != Some(address)
+                && !self
+                    .running_config
+                    .dhcp_excluded
+                    .iter()
+                    .any(|(first, last)| address >= *first && address <= *last)
+        };
+        let address = if let Some(address) = pool.reserved_address {
+            if !allowed(address) {
+                return None;
+            }
+            address
+        } else if let Some(address) = previous.filter(|address| allowed(*address)) {
+            address
+        } else {
+            let mut candidate = u32::from(network.address()).saturating_add(1);
+            let last = u32::from(network.broadcast()).saturating_sub(1);
+            loop {
+                if candidate > last {
+                    return None;
+                }
+                let address = Ipv4Addr::from(candidate);
+                if let Some(end) = self
+                    .running_config
+                    .dhcp_excluded
+                    .iter()
+                    .filter(|(first, last)| address >= **first && address <= **last)
+                    .map(|(_, last)| *last)
+                    .max()
+                {
+                    candidate = u32::from(end).checked_add(1)?;
+                } else if allowed(address) {
+                    break address;
+                } else {
+                    candidate = candidate.checked_add(1)?;
+                }
+            }
+        };
         let offer = DhcpOffer {
             address,
             prefix_len: network.prefix_len(),
             default_router: pool.default_router,
             server_id,
-            lease_time_seconds: (DHCP_LEASE_MS / 1000) as u32,
+            lease_time_seconds: pool.lease_seconds,
             pool: pool_id,
             expires_at: SimTime(now.0.saturating_add(DHCP_OFFER_MS * 1000)),
         };
@@ -234,11 +319,15 @@ impl Device {
         now: SimTime,
     ) -> Option<DhcpOffer> {
         self.expire_dhcp_server_state(now);
-        let mut offer = self.dhcp_offers.remove(&client_mac)?;
+        let mut offer = *self.dhcp_offers.get(&client_mac)?;
         if offer.address != address || offer.server_id != server_id {
             return None;
         }
-        offer.expires_at = SimTime(now.0.saturating_add(DHCP_LEASE_MS * 1000));
+        self.dhcp_offers.remove(&client_mac);
+        offer.expires_at = SimTime(
+            now.0
+                .saturating_add(u64::from(offer.lease_time_seconds) * 1_000_000),
+        );
         let pool_name = self
             .running_config
             .dhcp_pools
@@ -294,6 +383,31 @@ impl Device {
         }
     }
 
+    /// Inspect a client's current operational lease.
+    pub fn dhcp_lease(&self, interface: InterfaceId) -> Option<&DhcpLease> {
+        self.dhcp_leases.get(&interface)
+    }
+
+    /// Quarantine a declined address for ten simulated minutes.
+    pub fn decline_dhcp(&mut self, mac: MacAddress, address: Ipv4Addr, now: SimTime) {
+        let valid = self
+            .dhcp_bindings
+            .get(&mac)
+            .is_some_and(|binding| binding.address == address)
+            || self
+                .dhcp_offers
+                .get(&mac)
+                .is_some_and(|offer| offer.address == address);
+        if valid {
+            self.dhcp_bindings.remove(&mac);
+            self.dhcp_offers.remove(&mac);
+            if self.dhcp_conflicts.len() < MAX_DHCP_BINDINGS {
+                self.dhcp_conflicts
+                    .insert(address, SimTime(now.0.saturating_add(600_000_000)));
+            }
+        }
+    }
+
     /// Render current non-expired server bindings.
     pub fn show_ip_dhcp_binding(&mut self, now: SimTime) -> String {
         self.expire_dhcp_server_state(now);
@@ -313,6 +427,7 @@ impl Device {
     }
 
     fn expire_dhcp_server_state(&mut self, now: SimTime) {
+        self.dhcp_conflicts.retain(|_, deadline| *deadline > now);
         self.dhcp_offers.retain(|_, offer| offer.expires_at > now);
         self.dhcp_bindings
             .retain(|_, binding| binding.expires_at > now);

@@ -27,6 +27,8 @@ pub struct Lab {
     pub(crate) dhcp_generations: BTreeMap<DeviceId, u64>,
     pub(crate) dhcp_transactions: BTreeMap<InterfaceRef, u32>,
     pub(crate) next_dhcp_xid: u32,
+    pub(crate) dhcp_probes: BTreeMap<InterfaceRef, rios_protocol::DhcpMessage>,
+    pub(crate) dhcp_retry_after: BTreeMap<InterfaceRef, SimTime>,
 }
 
 #[derive(Debug)]
@@ -477,6 +479,8 @@ impl Lab {
         let generation = self.dhcp_generations.entry(device).or_default();
         *generation = generation.checked_add(1).ok_or(LabError::Capacity)?;
         let generation = *generation;
+        self.dhcp_probes
+            .retain(|interface, _| interface.device != device);
         self.dhcp_transactions
             .retain(|interface, _| interface.device != device);
         if !self.device(device)?.has_pending_dhcp_client() {

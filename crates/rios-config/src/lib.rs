@@ -39,6 +39,8 @@ pub struct InterfaceConfig {
     pub ipv4: Option<Ipv4InterfaceConfig>,
     /// Obtain runtime IPv4 configuration through DHCP.
     pub dhcp_client: bool,
+    #[serde(default)]
+    pub helper_address: Option<Ipv4Addr>,
     pub mtu: u16,
     /// Whether this hardware port can switch between Layer 2 and Layer 3 modes.
     #[serde(default)]
@@ -188,13 +190,28 @@ pub struct DhcpPoolId(pub u16);
 /// One IOS-style DHCP server pool.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DhcpPoolConfig {
+    #[serde(default = "default_lease_seconds")]
+    pub lease_seconds: u32,
+    #[serde(default)]
+    pub dns_servers: Vec<Ipv4Addr>,
+    #[serde(default)]
+    pub domain_name: Option<String>,
+    #[serde(default)]
+    pub reserved_address: Option<Ipv4Addr>,
+    #[serde(default)]
+    pub hardware_address: Option<rios_ethernet::MacAddress>,
     pub name: String,
     pub network: Option<Ipv4Network>,
     pub default_router: Option<Ipv4Addr>,
 }
+fn default_lease_seconds() -> u32 {
+    3600
+}
 /// Current structured configuration; runtime counters and carrier are separate.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunningConfig {
+    #[serde(default)]
+    pub dhcp_excluded: BTreeMap<Ipv4Addr, Ipv4Addr>,
     #[serde(default)]
     pub static_nat: BTreeSet<StaticNat>,
     #[serde(default)]
@@ -265,10 +282,46 @@ impl RunningConfig {
             }
             out.push_str("!\n");
         }
+        for (first, last) in &self.dhcp_excluded {
+            writeln!(out, "ip dhcp excluded-address {first} {last}").unwrap();
+        }
         for pool in self.dhcp_pools.values() {
             writeln!(out, "ip dhcp pool {}", pool.name).unwrap();
             if let Some(network) = pool.network {
                 writeln!(out, " network {} {}", network.address(), network.mask()).unwrap();
+            }
+            if let Some(address) = pool.reserved_address
+                && let Some(network) = pool.network
+            {
+                writeln!(out, " host {address} {}", network.mask()).unwrap();
+            }
+            if let Some(mac) = pool.hardware_address {
+                writeln!(out, " hardware-address {mac}").unwrap();
+            }
+            if pool.lease_seconds != 3600 {
+                writeln!(
+                    out,
+                    " lease {} {} {}",
+                    pool.lease_seconds / 86400,
+                    pool.lease_seconds % 86400 / 3600,
+                    pool.lease_seconds % 3600 / 60
+                )
+                .unwrap();
+            }
+            if !pool.dns_servers.is_empty() {
+                writeln!(
+                    out,
+                    " dns-server {}",
+                    pool.dns_servers
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                )
+                .unwrap();
+            }
+            if let Some(name) = &pool.domain_name {
+                writeln!(out, " domain-name {name}").unwrap();
             }
             if let Some(router) = pool.default_router {
                 writeln!(out, " default-router {router}").unwrap();
@@ -291,6 +344,9 @@ impl RunningConfig {
             }
             if config.switchport_capable && config.switchport.is_none() {
                 out.push_str(" no switchport\n");
+            }
+            if let Some(helper) = config.helper_address {
+                writeln!(out, " ip helper-address {helper}").unwrap();
             }
             if config.dhcp_client {
                 out.push_str(" ip address dhcp\n");
