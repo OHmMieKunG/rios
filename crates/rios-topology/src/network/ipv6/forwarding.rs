@@ -15,7 +15,7 @@ impl Lab {
         };
         self.send_ipv6_via(device, route, packet)
     }
-    fn send_ipv6_via(
+    pub(super) fn send_ipv6_via(
         &mut self,
         device: DeviceId,
         route: ResolvedIpv6Route,

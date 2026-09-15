@@ -36,6 +36,7 @@ pub enum OspfPortOption {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RoutingProtocol {
     Ospf,
+    Ospfv3,
     Rip,
     Bgp,
 }
@@ -225,6 +226,16 @@ pub enum Command {
         vlan: VlanId,
         native: bool,
     },
+    EnterRouterOspfv3(u16),
+    RemoveRouterOspfv3(u16),
+    BindOspfv3 {
+        binding: rios_config::OspfV3Binding,
+        present: bool,
+    },
+    SetOspfv3Port(OspfPortOption),
+    ShowIpv6OspfNeighbor,
+    ShowIpv6OspfInterface,
+    ShowIpv6OspfDatabase,
     EnterRouterOspf(u16),
     AddOspfNetwork(OspfNetworkConfig),
     SetOspfRouterId(Option<Ipv4Addr>),

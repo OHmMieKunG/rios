@@ -32,6 +32,9 @@ impl Default for OspfInterfaceConfig {
 
 impl OspfInterfaceConfig {
     pub(crate) fn render(&self, out: &mut String) {
+        self.render_for(out, "ip ospf");
+    }
+    pub(crate) fn render_for(&self, out: &mut String, command: &str) {
         use std::fmt::Write;
         let default = Self::default();
         for (name, value, normal) in [
@@ -49,11 +52,11 @@ impl OspfInterfaceConfig {
             ("dead-interval", self.dead_interval, default.dead_interval),
         ] {
             if value != normal {
-                let _ = writeln!(out, " ip ospf {name} {value}");
+                let _ = writeln!(out, " {command} {name} {value}");
             }
         }
         if self.network_type == OspfNetworkType::PointToPoint {
-            out.push_str(" ip ospf network point-to-point\n");
+            let _ = writeln!(out, " {command} network point-to-point");
         }
     }
 }

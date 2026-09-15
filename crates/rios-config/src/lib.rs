@@ -2,7 +2,7 @@
 #![forbid(unsafe_code)]
 mod acl;
 mod ipv6;
-pub use ipv6::{Ipv6InterfacePolicy, Ipv6StaticRoute};
+pub use ipv6::{Ipv6InterfacePolicy, Ipv6StaticRoute, OspfV3Binding, OspfV3Config};
 mod nat;
 mod ospf;
 pub use ospf::{OspfDefaultRoute, OspfInterfaceConfig, OspfNetworkType, OspfRedistribute};
@@ -247,6 +247,8 @@ fn default_lease_seconds() -> u32 {
 /// Current structured configuration; runtime counters and carrier are separate.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunningConfig {
+    #[serde(default)]
+    pub ospfv3: Option<OspfV3Config>,
     #[serde(default)]
     pub ipv6_unicast_routing: bool,
     #[serde(default)]
@@ -584,6 +586,18 @@ impl RunningConfig {
                 interface.name
             )
             .unwrap();
+        }
+        if let Some(ospf) = &self.ospfv3 {
+            let _ = writeln!(out, "ipv6 router ospf {}", ospf.process_id);
+            if let Some(id) = ospf.router_id {
+                let _ = writeln!(out, " router-id {id}");
+            }
+            for id in &ospf.passive_interfaces {
+                if let Some(port) = self.interfaces.get(id) {
+                    let _ = writeln!(out, " passive-interface {}", port.name);
+                }
+            }
+            out.push_str("!\n");
         }
         if let Some(ospf) = &self.ospf {
             writeln!(out, "router ospf {}", ospf.process_id).unwrap();

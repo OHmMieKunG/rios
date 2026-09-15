@@ -179,7 +179,9 @@ fn parse_input(
         | Action::NatStatic
         | Action::Do
         | Action::Dot1q => usize::MAX,
-        Action::StaticRoute | Action::NoStaticRoute => 3,
+        Action::BindOspfv3 | Action::NoBindOspfv3 | Action::StaticRoute | Action::NoStaticRoute => {
+            3
+        }
         Action::DhcpLease | Action::DhcpDns | Action::DhcpExcluded => usize::MAX,
         Action::DhcpHost => 2,
         Action::DhcpDomain | Action::DhcpHardware | Action::DhcpHelper => 1,
@@ -199,7 +201,13 @@ fn parse_input(
         | Action::SwitchportTrunkAllowed
         | Action::DhcpPool
         | Action::DhcpDefaultRouter => 1,
-        Action::RouterOspf
+        Action::RouterOspfv3
+        | Action::NoRouterOspfv3
+        | Action::V3Cost
+        | Action::V3Priority
+        | Action::V3Hello
+        | Action::V3Dead
+        | Action::RouterOspf
         | Action::OspfRouterId
         | Action::OspfPassive
         | Action::NoOspfPassive
@@ -248,6 +256,70 @@ fn parse_input(
     };
     use Action::*;
     let command = match action {
+        RouterOspfv3 | NoRouterOspfv3 => {
+            let id = args[0]
+                .text
+                .parse::<u16>()
+                .ok()
+                .filter(|n| *n > 0)
+                .ok_or_else(|| invalid(args[0].offset, "expected process ID 1-65535"))?;
+            if matches!(action, RouterOspfv3) {
+                Command::EnterRouterOspfv3(id)
+            } else {
+                Command::RemoveRouterOspfv3(id)
+            }
+        }
+        BindOspfv3 | NoBindOspfv3 => {
+            let id = args[0]
+                .text
+                .parse::<u16>()
+                .ok()
+                .filter(|n| *n > 0)
+                .ok_or_else(|| invalid(args[0].offset, "expected process ID 1-65535"))?;
+            unique_choice(&args[1], &["area"])?;
+            let area = args[2]
+                .text
+                .parse::<u32>()
+                .or_else(|_| args[2].text.parse::<Ipv4Addr>().map(u32::from))
+                .map_err(|_| invalid(args[2].offset, "expected area ID"))?;
+            Command::BindOspfv3 {
+                binding: rios_config::OspfV3Binding {
+                    process_id: id,
+                    area,
+                },
+                present: matches!(action, BindOspfv3),
+            }
+        }
+        V3Neighbor => Command::ShowIpv6OspfNeighbor,
+        V3Interface => Command::ShowIpv6OspfInterface,
+        V3Database => Command::ShowIpv6OspfDatabase,
+        V3Cost | V3Priority | V3Hello | V3Dead => {
+            let value = args[0]
+                .text
+                .parse::<u16>()
+                .map_err(|_| invalid(args[0].offset, "expected integer 0-65535"))?;
+            if (matches!(action, V3Priority) && value > 255)
+                || (!matches!(action, V3Priority) && value == 0)
+            {
+                return Err(invalid(args[0].offset, "value outside range"));
+            }
+            Command::SetOspfv3Port(match action {
+                V3Cost => OspfPortOption::Cost(value),
+                V3Priority => OspfPortOption::Priority(value as u8),
+                V3Hello => OspfPortOption::Hello(value),
+                _ => OspfPortOption::Dead(u32::from(value)),
+            })
+        }
+        NoV3Cost => Command::SetOspfv3Port(OspfPortOption::Cost(1)),
+        NoV3Priority => Command::SetOspfv3Port(OspfPortOption::Priority(1)),
+        NoV3Hello => Command::SetOspfv3Port(OspfPortOption::Hello(10)),
+        NoV3Dead => Command::SetOspfv3Port(OspfPortOption::Dead(40)),
+        V3PointToPoint => Command::SetOspfv3Port(OspfPortOption::Network(
+            rios_config::OspfNetworkType::PointToPoint,
+        )),
+        V3Broadcast => Command::SetOspfv3Port(OspfPortOption::Network(
+            rios_config::OspfNetworkType::Broadcast,
+        )),
         Ipv6Routing => Command::SetIpv6Routing(true),
         NoIpv6Routing => Command::SetIpv6Routing(false),
         Ipv6Enable => Command::SetIpv6Port(Ipv6PortOption::Enable(true)),
@@ -333,6 +405,9 @@ fn parse_input(
                     | Command::ShowVlanBrief
                     | Command::ShowIpv6InterfaceBrief
                     | Command::ShowIpv6Neighbors
+                    | Command::ShowIpv6OspfNeighbor
+                    | Command::ShowIpv6OspfInterface
+                    | Command::ShowIpv6OspfDatabase
                     | Command::ShowIpv6Route
                     | Command::PingIpv6 { .. }
                     | Command::ShowIpOspf
@@ -863,6 +938,15 @@ pub fn suggestions(
         }
     }
     if !result.is_empty() && !matches!(node.action, Some(Action::Interfaces)) {
+        if matches!(node.action, Some(Action::BindOspfv3 | Action::NoBindOspfv3))
+            && partial.is_empty()
+        {
+            result.push(Suggestion {
+                word: "<process-id>".into(),
+                help: "OSPFv3 process ID".into(),
+                start,
+            });
+        }
         if matches!(node.action, Some(Action::NatOverload)) {
             result.extend(nat::suggest(Action::NatOverload, &[], partial, start)?);
         }
@@ -1029,6 +1113,19 @@ pub fn suggestions(
                 | Action::DhcpExcluded
                 | Action::DhcpHelper => {
                     return dhcp::suggest(action, args, partial, start);
+                }
+                Action::BindOspfv3 | Action::NoBindOspfv3 if args.len() < 3 => {
+                    action.argument_help()[args.len()]
+                }
+                Action::RouterOspfv3
+                | Action::NoRouterOspfv3
+                | Action::V3Cost
+                | Action::V3Priority
+                | Action::V3Hello
+                | Action::V3Dead
+                    if args.is_empty() =>
+                {
+                    action.argument_help()[0]
                 }
                 Action::StpPriority if args.is_empty() => "<vlan-id>",
                 Action::StpPriority if args.len() == 1 => "priority",

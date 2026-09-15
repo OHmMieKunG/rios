@@ -51,11 +51,12 @@ impl Device {
     }
     pub fn show_ipv6_route(&self) -> String {
         let mut out = String::from(
-            "IPv6 Routing Table\nCodes: C - connected, S - static, ND - router advertisement\n",
+            "IPv6 Routing Table\nCodes: C - connected, S - static, O - OSPF, ND - router advertisement\n",
         );
         for route in self.ipv6_routes() {
             let code = match route.source {
                 Ipv6RouteSource::Connected => "C",
+                Ipv6RouteSource::Ospf => "O",
                 Ipv6RouteSource::Static => "S",
                 Ipv6RouteSource::RouterAdvertisement => "ND",
             };

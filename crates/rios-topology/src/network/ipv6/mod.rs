@@ -1,6 +1,7 @@
 //! IPv6 Ethernet ingress, virtual protocol timers and bounded neighbor-resolution queues.
 mod forwarding;
 mod icmp;
+mod ospfv3;
 mod ping;
 use super::*;
 pub use ping::Ping6Result;
@@ -50,7 +51,16 @@ impl Lab {
             .ipv6_tick(now);
         self.emit_ipv6_control(device, packets)?;
         self.flush_ipv6_pending(device)?;
-        let deadline = self.device(device)?.ipv6_next_deadline(self.now());
+        let packets = self
+            .devices
+            .get_mut(&device)
+            .ok_or(DropReason::NoLink)?
+            .ospfv3_tick(now);
+        self.emit_ospfv3(device, packets)?;
+        let deadline = self
+            .device(device)?
+            .ipv6_next_deadline(self.now())
+            .min(self.device(device)?.ospfv3_next_deadline(self.now()));
         self.schedule_ipv6_at(device, deadline)
     }
     fn emit_ipv6_control(
@@ -119,6 +129,15 @@ impl Lab {
             }
             Err(_) => return self.ipv6_bad_packet(interface),
         };
+        if upper.protocol == NextHeader::Ospf {
+            if local
+                || packet.destination == rios_routing::OSPFV3_ALL_ROUTERS
+                || packet.destination == rios_routing::OSPFV3_ALL_DR
+            {
+                return self.handle_ospfv3(interface, &packet, upper.payload);
+            }
+            return Ok(());
+        }
         if upper.protocol == NextHeader::Icmpv6 {
             let Ok(message) =
                 Icmpv6Message::decode(packet.source, packet.destination, upper.payload)
@@ -147,7 +166,11 @@ impl Lab {
                 self.flush_ipv6_pending(interface.device)?;
                 let deadline = self
                     .device(interface.device)?
-                    .ipv6_next_deadline(self.now());
+                    .ipv6_next_deadline(self.now())
+                    .min(
+                        self.device(interface.device)?
+                            .ospfv3_next_deadline(self.now()),
+                    );
                 return self.schedule_ipv6_at(interface.device, deadline);
             }
             if local {

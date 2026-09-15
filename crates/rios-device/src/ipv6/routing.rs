@@ -5,6 +5,7 @@ use super::*;
 pub enum Ipv6RouteSource {
     Connected,
     Static,
+    Ospf,
     RouterAdvertisement,
 }
 /// A resolved IPv6 route candidate, independent of IPv4 route state.
@@ -100,6 +101,13 @@ impl Device {
                 });
             }
         }
+        routes.extend(
+            self.ospfv3
+                .routes
+                .iter()
+                .filter(|r| self.protocol_up(r.interface))
+                .copied(),
+        );
         routes
     }
     pub fn resolve_ipv6_route(
@@ -132,7 +140,20 @@ impl Device {
                 r.interface,
             )
         })?;
-        let source_ip = self.ipv6_source(route.interface, destination)?;
+        let source_ip = self
+            .ipv6_source(route.interface, destination)
+            .or_else(|| {
+                // Unnumbered IPv6 transit links use a global source from another usable interface.
+                if destination.is_unicast_link_local() {
+                    return None;
+                }
+                self.interfaces
+                    .keys()
+                    .filter(|id| self.protocol_up(**id))
+                    .filter_map(|id| self.ipv6_source(*id, destination))
+                    .min()
+            })
+            .or_else(|| self.ipv6_link_local(route.interface))?;
         Some(ResolvedIpv6Route {
             interface: route.interface,
             source_ip,

@@ -1130,3 +1130,83 @@ fn ipv6_configuration_help_no_and_do_replay() {
     assert!(router.running_config().ipv6_static_routes.is_empty());
     assert!(!router.running_config().ipv6_unicast_routing);
 }
+
+#[test]
+fn ospfv3_commands_abbreviate_explain_arguments_and_replay_structured_state() {
+    assert!(matches!(
+        parse("ipv6 rou ospf 1", CliMode::GlobalConfiguration),
+        Err(ParseError::Ambiguous(_))
+    ));
+    let mut router = Device::standalone();
+    let mut session = CliSession {
+        mode: CliMode::GlobalConfiguration,
+    };
+    for command in [
+        "ipv6 unicast-routing",
+        "ipv6 router ospf 1",
+        "rou 1.1.1.1",
+        "passive-interface gi0/1",
+        "int gi0/0",
+        "ipv6 enable",
+        "ipv6 ospf 1 area 0",
+        "ipv6 ospf net p",
+        "ipv6 ospf cost 10",
+        "ipv6 ospf hello 2",
+        "ipv6 ospf dead 8",
+        "ipv6 ospf pri 0",
+        "no shut",
+        "do sh ipv6 ospf nei",
+        "end",
+    ] {
+        run(&mut router, &mut session, command).unwrap();
+    }
+    let mut restored = Device::standalone();
+    load_configuration(&mut restored, &router.running_config().render()).unwrap();
+    assert_eq!(restored.running_config(), router.running_config());
+    let mode = CliMode::InterfaceConfiguration(InterfaceId(1));
+    assert!(
+        suggestions("ipv6 ospf ", mode, &[])
+            .unwrap()
+            .iter()
+            .any(|s| s.word == "<process-id>")
+    );
+    assert_eq!(
+        suggestions("ipv6 ospf 1 ", mode, &[]).unwrap()[0].word,
+        "area"
+    );
+    assert_eq!(
+        suggestions("ipv6 ospf 1 area ", mode, &[]).unwrap()[0].word,
+        "<area-id>"
+    );
+    assert!(parse("ipv6 ospf 1 ar", mode).is_err());
+    assert!(parse("ipv6 ospf cost 0", mode).is_err());
+    assert!(matches!(
+        parse("ipv6 ospf c", mode),
+        Err(ParseError::Incomplete)
+    ));
+    for command in [
+        "conf t",
+        "int gi0/0",
+        "no ipv6 ospf cost",
+        "no ipv6 ospf hello-interval",
+        "no ipv6 ospf dead-interval",
+        "no ipv6 ospf priority",
+        "no ipv6 ospf network",
+        "no ipv6 ospf 1 area 0",
+        "exit",
+        "ipv6 router ospf 1",
+        "no passive-interface gi0/1",
+        "no router-id",
+        "exit",
+        "no ipv6 router ospf 1",
+    ] {
+        run(&mut router, &mut session, command).unwrap();
+    }
+    assert!(router.running_config().ospfv3.is_none());
+    let c = &router.running_config().interfaces[&InterfaceId(1)].ipv6;
+    assert!(c.ospf.is_none());
+    assert_eq!(
+        c.ospf_parameters,
+        rios_config::OspfInterfaceConfig::default()
+    );
+}

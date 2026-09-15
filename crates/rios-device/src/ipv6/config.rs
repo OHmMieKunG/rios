@@ -33,7 +33,13 @@ impl Device {
         if config.switchport.is_some() {
             return Err(DeviceError::NotRoutedPort);
         }
-        if config.mtu < 1280
+        if policy.ospf.is_some_and(|b| b.process_id == 0)
+            || policy.ospf_parameters.cost == 0
+            || policy.ospf_parameters.hello_interval == 0
+            || policy.ospf_parameters.dead_interval == 0
+            || policy.ospf_parameters.dead_interval > 65535
+            || (policy.ospf.is_some() && !self.supports_routing())
+            || config.mtu < 1280
             || policy.addresses.len() > ADDRESS_LIMIT - 1
             || policy
                 .addresses

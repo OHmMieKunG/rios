@@ -1,3 +1,4 @@
+mod ospfv3;
 use crate::CliMode;
 
 #[derive(Debug, Clone, Copy)]
@@ -63,6 +64,23 @@ pub(crate) enum Action {
     SwitchportTrunkAllowed,
     NativeVlan,
     Dot1q,
+    RouterOspfv3,
+    NoRouterOspfv3,
+    BindOspfv3,
+    NoBindOspfv3,
+    V3Cost,
+    V3Priority,
+    V3Hello,
+    V3Dead,
+    NoV3Cost,
+    NoV3Priority,
+    NoV3Hello,
+    NoV3Dead,
+    V3PointToPoint,
+    V3Broadcast,
+    V3Neighbor,
+    V3Interface,
+    V3Database,
     RouterOspf,
     OspfNetwork,
     OspfDefault,
@@ -178,9 +196,15 @@ impl Action {
             Self::VlanName => &["<name>"],
             Self::OspfRouterId => &["<router-id>"],
             Self::OspfPassive | Self::NoOspfPassive => &["<interface>"],
-            Self::OspfCost | Self::OspfHello | Self::OspfDead => &["<1-65535>"],
-            Self::OspfPriority => &["<0-255>"],
-            Self::RouterOspf => &["<process-id>"],
+            Self::V3Cost
+            | Self::V3Hello
+            | Self::V3Dead
+            | Self::OspfCost
+            | Self::OspfHello
+            | Self::OspfDead => &["<1-65535>"],
+            Self::V3Priority | Self::OspfPriority => &["<0-255>"],
+            Self::RouterOspfv3 | Self::NoRouterOspfv3 | Self::RouterOspf => &["<process-id>"],
+            Self::BindOspfv3 | Self::NoBindOspfv3 => &["<process-id>", "area", "<area-id>"],
             Self::OspfNetwork => &["<address> <wildcard> area <area-id>"],
             Self::Ping => &["<ipv4>"],
             _ => &["<cr>"],
@@ -1052,5 +1076,6 @@ pub(crate) fn tree(mode: CliMode) -> Node {
             }
         }
     }
+    ospfv3::add(&mut root, mode);
     root
 }

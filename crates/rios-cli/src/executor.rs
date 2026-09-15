@@ -59,6 +59,9 @@ fn executable_after_do(command: &Command) -> bool {
             | Command::ShowVlanBrief
             | Command::ShowIpv6InterfaceBrief
             | Command::ShowIpv6Neighbors
+            | Command::ShowIpv6OspfNeighbor
+            | Command::ShowIpv6OspfInterface
+            | Command::ShowIpv6OspfDatabase
             | Command::ShowIpv6Route
             | Command::PingIpv6 { .. }
             | Command::ShowIpOspf
@@ -142,12 +145,14 @@ pub fn execute_at(
                 InterfaceConfiguration(_) | InterfaceRangeConfiguration(_, _)
             )
         }
-        Command::SetOspfPort(_) => matches!(
-            mode,
-            InterfaceConfiguration(_)
-                | SubinterfaceConfiguration(_)
-                | InterfaceRangeConfiguration(_, _)
-        ),
+        Command::BindOspfv3 { .. } | Command::SetOspfv3Port(_) | Command::SetOspfPort(_) => {
+            matches!(
+                mode,
+                InterfaceConfiguration(_)
+                    | SubinterfaceConfiguration(_)
+                    | InterfaceRangeConfiguration(_, _)
+            )
+        }
         Command::SetNamedAccessGroup { .. } => matches!(
             mode,
             InterfaceConfiguration(_) | SubinterfaceConfiguration(_)
@@ -170,12 +175,16 @@ pub fn execute_at(
             matches!(mode, DhcpPoolConfiguration(_))
         }
         Command::EnterVlan(_) => matches!(mode, GlobalConfiguration | VlanConfiguration(_)),
-        Command::EnterRouterOspf(_) => mode == GlobalConfiguration,
+        Command::EnterRouterOspfv3(_)
+        | Command::RemoveRouterOspfv3(_)
+        | Command::EnterRouterOspf(_) => mode == GlobalConfiguration,
+        Command::SetOspfRouterId(_) | Command::SetOspfPassive { .. } => matches!(
+            mode,
+            RouterConfiguration(RoutingProtocol::Ospf | RoutingProtocol::Ospfv3)
+        ),
         Command::NameVlan(_) => matches!(mode, VlanConfiguration(_)),
         Command::SetOspfDefault(_)
         | Command::SetOspfRedistributeStatic(_)
-        | Command::SetOspfRouterId(_)
-        | Command::SetOspfPassive { .. }
         | Command::AddOspfNetwork(_) => matches!(mode, RouterConfiguration(RoutingProtocol::Ospf)),
         Command::EnterInterface(_) | Command::EnterInterfaceRange { .. } | Command::End => {
             config_mode
@@ -222,6 +231,9 @@ pub fn execute_at(
         | Command::ShowVlanBrief
         | Command::ShowIpv6InterfaceBrief
         | Command::ShowIpv6Neighbors
+        | Command::ShowIpv6OspfNeighbor
+        | Command::ShowIpv6OspfInterface
+        | Command::ShowIpv6OspfDatabase
         | Command::ShowIpv6Route
         | Command::PingIpv6 { .. }
         | Command::ShowIpOspf
@@ -398,6 +410,43 @@ pub fn execute_at(
             session.mode = VlanConfiguration(vlan);
         }
         Command::RemoveVlan(vlan) => device.remove_vlan(vlan)?,
+        Command::EnterRouterOspfv3(process_id) => {
+            device.set_ospfv3_process(Some(process_id))?;
+            session.mode = RouterConfiguration(RoutingProtocol::Ospfv3);
+        }
+        Command::RemoveRouterOspfv3(process_id) => {
+            if device
+                .running_config()
+                .ospfv3
+                .as_ref()
+                .is_some_and(|c| c.process_id == process_id)
+            {
+                device.set_ospfv3_process(None)?;
+            }
+        }
+        Command::BindOspfv3 { binding, present } => edit_interfaces(device, mode, |d, id| {
+            let policy = &d.running_config().interfaces[&id].ipv6;
+            if !present && policy.ospf != Some(binding) {
+                return Ok(());
+            }
+            d.set_ospfv3_interface(id, present.then_some(binding), policy.ospf_parameters)
+        })?,
+        Command::SetOspfv3Port(option) => edit_interfaces(device, mode, |d, id| {
+            let c = &d.running_config().interfaces[&id].ipv6;
+            let binding = c.ospf;
+            let mut policy = c.ospf_parameters;
+            match option {
+                OspfPortOption::Cost(v) => policy.cost = v,
+                OspfPortOption::Priority(v) => policy.priority = v,
+                OspfPortOption::Hello(v) => policy.hello_interval = v,
+                OspfPortOption::Dead(v) => policy.dead_interval = v,
+                OspfPortOption::Network(v) => policy.network_type = v,
+            }
+            d.set_ospfv3_interface(id, binding, policy)
+        })?,
+        Command::ShowIpv6OspfNeighbor => result.output = device.show_ipv6_ospf_neighbor(now),
+        Command::ShowIpv6OspfInterface => result.output = device.show_ipv6_ospf_interface(),
+        Command::ShowIpv6OspfDatabase => result.output = device.show_ipv6_ospf_database(now),
         Command::EnterRouterOspf(process_id) => {
             device.set_ospf_process(process_id)?;
             session.mode = RouterConfiguration(RoutingProtocol::Ospf);
@@ -407,12 +456,22 @@ pub fn execute_at(
         Command::SetOspfRedistributeStatic(policy) => {
             device.set_ospf_redistribute_static(policy)?
         }
-        Command::SetOspfRouterId(id) => device.set_ospf_router_id(id)?,
+        Command::SetOspfRouterId(id) => {
+            if mode == RouterConfiguration(RoutingProtocol::Ospfv3) {
+                device.set_ospfv3_router_id(id)?
+            } else {
+                device.set_ospf_router_id(id)?
+            }
+        }
         Command::SetOspfPassive { interface, passive } => {
             let id = device
                 .find_interface(&interface)
                 .ok_or(rios_device::DeviceError::MissingInterface)?;
-            device.set_ospf_passive(id, passive)?;
+            if mode == RouterConfiguration(RoutingProtocol::Ospfv3) {
+                device.set_ospfv3_passive(id, passive)?
+            } else {
+                device.set_ospf_passive(id, passive)?;
+            }
         }
         Command::SetOspfPort(option) => edit_interfaces(device, mode, |device, id| {
             let mut policy = device.running_config().interfaces[&id].ospf;

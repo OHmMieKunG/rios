@@ -7,6 +7,8 @@ use std::{collections::BTreeSet, fmt::Write, net::Ipv6Addr};
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Ipv6InterfacePolicy {
+    pub ospf: Option<OspfV3Binding>,
+    pub ospf_parameters: crate::OspfInterfaceConfig,
     pub enabled: bool,
     pub addresses: BTreeSet<Ipv6InterfaceConfig>,
     pub link_local: Option<Ipv6Addr>,
@@ -18,6 +20,14 @@ impl Ipv6InterfacePolicy {
         self.enabled || self.autoconfig || self.link_local.is_some() || !self.addresses.is_empty()
     }
     pub(crate) fn render(&self, out: &mut String) {
+        if let Some(binding) = self.ospf {
+            let _ = writeln!(
+                out,
+                " ipv6 ospf {} area {}",
+                binding.process_id, binding.area
+            );
+        }
+        self.ospf_parameters.render_for(out, "ipv6 ospf");
         if self.enabled {
             out.push_str(" ipv6 enable\n");
         }
@@ -41,4 +51,18 @@ pub struct Ipv6StaticRoute {
     pub prefix: Ipv6Network,
     pub next_hop: Ipv6Addr,
     pub interface: Option<InterfaceId>,
+}
+
+/// One OSPFv3 process; router ID remains the protocol's 32-bit identifier.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OspfV3Config {
+    pub process_id: u16,
+    pub router_id: Option<std::net::Ipv4Addr>,
+    pub passive_interfaces: BTreeSet<InterfaceId>,
+}
+/// Interface-to-process and area assignment for IPv6 OSPF.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OspfV3Binding {
+    pub process_id: u16,
+    pub area: u32,
 }

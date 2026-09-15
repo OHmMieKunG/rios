@@ -487,3 +487,42 @@ change these defaults. The implementation follows public
 [RFC 4443](https://www.rfc-editor.org/rfc/rfc4443),
 [RFC 4861](https://www.rfc-editor.org/rfc/rfc4861) and
 [RFC 4862](https://www.rfc-editor.org/rfc/rfc4862).
+
+## OSPFv3 over IPv6
+
+OSPFv3 uses standard protocol 89 packets with IPv6 pseudoheader checksums.
+Hello, DBD, LSR, LSU and LSAck packets cross virtual Ethernet links; unicast
+exchange resolves scoped link-local neighbors through ND. OSPFv2 and OSPFv3
+share the bounded master/slave database exchange, LSA checksum/instance ordering
+and DR/BDR election algorithms. Their wire bodies and address/prefix models
+remain separate.
+
+Router, Network, Link and Intra-Area-Prefix LSAs drive IPv6 SPF. Router/interface
+identifiers describe connectivity; separate IPv6 prefix advertisements describe
+reachability. Reciprocal links are required, including matching interface IDs
+for parallel point-to-point links. Link-LSAs stay on their originating link.
+Unknown LSAs retain their wire contents and obey the U-bit flooding scope rule.
+The RIB installs scoped link-local next hops, so transit links need no global
+IPv6 address. Broadcast links elect DR/BDR; DROther pairs remain TwoWay.
+
+Use `ipv6 router ospf 1` and `router-id 1.1.1.1`, then `ipv6 ospf 1 area 0` on
+IPv6-enabled interfaces. Cost, priority, hello/dead intervals, network type and
+passive-interface settings affect actual packets and routes. Operational commands
+are `show ipv6 ospf neighbor`, `interface`, and `database`.
+
+```sh
+cargo run -- lab examples/three-routers.yaml < examples/ospfv3-session.txt
+```
+
+Tests cover all wire formats, malformed input, prefix widths, IPv6 MTU paging,
+each exchange packet's loss/retransmission, weighted SPF, three-router forwarding,
+link-scoped LSDB isolation, withdrawal, deterministic seeded loss, area/timer
+mismatch, passive behavior, broadcast DR failure and CLI configuration replay.
+Neighbors are bounded to 256 and the LSDB to 4096 entries per device. LSA aging,
+refresh, self-originated fightback and retransmissions use simulation time.
+
+This milestone supports intra-area routing in normal areas with one process and
+instance ID 0. It does not yet originate inter-area or external routes, implement
+virtual links, authentication/IPsec, ECMP, or fragment an individual oversized
+LSA. IPv4 OSPF functionality remains independent. Protocol formats follow
+[RFC 5340](https://www.rfc-editor.org/rfc/rfc5340).

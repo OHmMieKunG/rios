@@ -1,6 +1,8 @@
 //! Device inventory and validated state transitions, independent of CLI syntax.
 #![forbid(unsafe_code)]
 mod acl;
+mod ospfv3;
+pub use ospfv3::{OspfV3NeighborInfo, OspfV3Transmission};
 mod ipv6;
 pub use ipv6::{
     Ipv6AddressEntry, Ipv6AddressOrigin, Ipv6AddressState, Ipv6ControlPacket, Ipv6Neighbor,
@@ -127,6 +129,7 @@ pub struct Interface {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Device {
     ipv6: ipv6::Ipv6Runtime,
+    ospfv3: ospfv3::OspfV3Runtime,
     stp_errdisabled: BTreeSet<InterfaceId>,
     lacp_neighbors: BTreeMap<InterfaceId, LacpNeighbor>,
     tcp: tcp::TcpRuntime,
@@ -284,7 +287,9 @@ impl Device {
             device_type,
             interfaces: BTreeMap::new(),
             ipv6: ipv6::Ipv6Runtime::default(),
+            ospfv3: ospfv3::OspfV3Runtime::default(),
             running_config: RunningConfig {
+                ospfv3: None,
                 ipv6_unicast_routing: false,
                 ipv6_static_routes: BTreeSet::new(),
                 spanning_tree: rios_config::StpConfig::default(),
