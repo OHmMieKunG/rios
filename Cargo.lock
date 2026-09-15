@@ -1480,6 +1480,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rios-ipv6"
+version = "0.1.0"
+dependencies = [
+ "rios-ethernet",
+ "rios-simulator",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "rios-protocol"
 version = "0.1.0"
 dependencies = [

@@ -4,6 +4,7 @@ use crate::{MacAddress, VlanId};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EtherType {
     Ipv4,
+    Ipv6,
     Arp,
     Dot1Q,
     Other(u16),
@@ -14,6 +15,7 @@ impl From<u16> for EtherType {
     fn from(value: u16) -> Self {
         match value {
             0x0800 => Self::Ipv4,
+            0x86dd => Self::Ipv6,
             0x0806 => Self::Arp,
             0x8100 => Self::Dot1Q,
             3..=1500 => Self::Length(value),
@@ -25,6 +27,7 @@ impl From<EtherType> for u16 {
     fn from(value: EtherType) -> Self {
         match value {
             EtherType::Ipv4 => 0x0800,
+            EtherType::Ipv6 => 0x86dd,
             EtherType::Arp => 0x0806,
             EtherType::Dot1Q => 0x8100,
             EtherType::Other(v) | EtherType::Length(v) => v,

@@ -14,6 +14,7 @@ thiserror = "2"
 rios-simulator = { path = "crates/rios-simulator" }
 rios-ethernet = { path = "crates/rios-ethernet" }
 rios-ipv4 = { path = "crates/rios-ipv4" }
+rios-ipv6 = { path = "crates/rios-ipv6" }
 rios-protocol = { path = "crates/rios-protocol" }
 rios-config = { path = "crates/rios-config" }
 rios-device = { path = "crates/rios-device" }
