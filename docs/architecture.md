@@ -281,3 +281,22 @@ in a bounded 256-entry device buffer (`take_acl_logs`), with cumulative per-rule
 log counts. Lists and entries are capped at 4096 each. Editing an entry resets its
 counters. Legacy standard lists retain their serialized representation until
 selected through named-list configuration, which promotes their existing rules.
+
+## Simulated TCP
+
+The TCP codec validates header length, options, and the IPv4 pseudoheader checksum
+using the public [RFC 9293](https://www.rfc-editor.org/rfc/rfc9293.html) wire format.
+A device owns bounded listener and connection tables; the lab exposes `tcp_listen`,
+`tcp_connect`, `tcp_send`, `tcp_read`, and `tcp_close`. SYN/SYN-ACK/ACK, payload,
+FIN/ACK, and RST traverse normal IPv4 routing, neighbor resolution, ACLs, and link
+queues. No host OS sockets participate.
+
+The initial connection engine uses stop-and-wait with at most one outstanding
+segment of up to 1200 payload bytes. Busy sends return explicit backpressure.
+Receive buffers are limited to 65535 bytes, duplicate bytes are acknowledged
+without delivery, and reads advertise the reopened window. Per-device limits are
+1024 listeners and 1024 connections. Virtual timers retransmit with bounded
+exponential backoff, expire idle connections after 300 seconds, and retain
+TIME-WAIT for 120 seconds. This is a deliberately limited educational TCP stack:
+sliding windows, congestion algorithms, SACK, simultaneous open, option negotiation,
+and out-of-order reassembly remain beyond this initial implementation.

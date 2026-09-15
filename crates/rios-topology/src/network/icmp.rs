@@ -7,6 +7,9 @@ impl Lab {
         device: DeviceId,
         packet: Ipv4Packet,
     ) -> Result<(), LabError> {
+        if packet.protocol == IpProtocol::Tcp {
+            return self.handle_tcp(device, packet);
+        }
         if packet.protocol != IpProtocol::Icmp {
             return Ok(());
         }

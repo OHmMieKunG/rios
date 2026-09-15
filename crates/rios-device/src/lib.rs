@@ -11,6 +11,7 @@ mod network;
 mod ospf;
 mod stp;
 mod subinterface;
+mod tcp;
 pub use dhcp::{DhcpBinding, DhcpLease, DhcpOffer};
 pub use ethernet::{DropReason, MacEntry};
 pub use nat::{NatProtocol, NatTranslation};
@@ -25,6 +26,7 @@ use rios_routing::{OspfNeighbor, RouterLsa};
 use rios_simulator::{DeviceId, InterfaceId, LinkState};
 use rios_switching::{ConfigurationBpdu, StpPortRole, StpPortState};
 use std::collections::{BTreeMap, BTreeSet};
+pub use tcp::{TcpConnection, TcpError, TcpSocket, TcpState};
 
 /// Supported classes of simulated device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,6 +116,7 @@ pub struct Interface {
 /// A virtual device with privately owned runtime and configuration state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Device {
+    tcp: tcp::TcpRuntime,
     acl_matches: BTreeMap<(rios_config::AclId, u32), u64>,
     acl_logs: BTreeMap<(rios_config::AclId, u32), u64>,
     acl_log_records: std::collections::VecDeque<AclLog>,
@@ -255,6 +258,7 @@ impl Device {
             vlans.insert(VlanId::DEFAULT, VlanConfig::default());
         }
         Ok(Self {
+            tcp: tcp::TcpRuntime::default(),
             acl_matches: BTreeMap::new(),
             acl_logs: BTreeMap::new(),
             acl_log_records: Default::default(),

@@ -183,6 +183,10 @@ impl Lab {
             return Ok(None);
         };
         let outcome = match scheduled.event {
+            SimulationEvent::TcpTick { device } => {
+                self.tcp_timer(device)?;
+                return Ok(None);
+            }
             SimulationEvent::FrameReceived {
                 link,
                 generation,

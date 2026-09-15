@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 /// Single owner of a lab's devices, links, clock, and pending traffic.
 #[derive(Debug, Default)]
 pub struct Lab {
+    pub(crate) tcp_timers: std::collections::BTreeSet<DeviceId>,
     pub(crate) capture: Option<crate::capture::Capture>,
     pub(crate) seed: u64,
     pub(crate) rng: rios_simulator::SimulationRng,

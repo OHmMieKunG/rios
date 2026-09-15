@@ -37,6 +37,9 @@ impl Link {
 /// Concrete internal events scheduled by the lab, with owned frame payloads.
 #[derive(Debug)]
 pub(crate) enum SimulationEvent {
+    TcpTick {
+        device: rios_simulator::DeviceId,
+    },
     FrameReceived {
         link: LinkId,
         generation: u64,
@@ -114,6 +117,8 @@ pub struct TraceRecord {
 /// Topology, device, scheduling, and delivery failures.
 #[derive(Debug, thiserror::Error)]
 pub enum LabError {
+    #[error(transparent)]
+    Tcp(#[from] rios_device::TcpError),
     #[error("capture: {0}")]
     Capture(String),
     #[error("invalid topology: {0}")]
