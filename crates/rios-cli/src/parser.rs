@@ -1,4 +1,5 @@
 mod acl;
+mod nat;
 use crate::{
     tree::{Action, Node, tree},
     *,
@@ -162,10 +163,14 @@ fn parse_input(
     let action = node.action.ok_or(ParseError::Incomplete)?;
     let args = &words[index..];
     let expected = match action {
-        Action::Address | Action::AccessList | Action::NatOverload | Action::Do | Action::Dot1q => {
-            usize::MAX
-        }
+        Action::Address
+        | Action::AccessList
+        | Action::NatOverload
+        | Action::NatStatic
+        | Action::Do
+        | Action::Dot1q => usize::MAX,
         Action::StaticRoute | Action::NoStaticRoute => 3,
+        Action::NatPool => 5,
         Action::AccessGroup => 2,
         Action::DhcpNetwork => 2,
         Action::Hostname
@@ -281,6 +286,8 @@ fn parse_input(
                     | Command::ShowAccessLists
                     | Command::ShowIpDhcpBinding
                     | Command::ShowIpNatTranslations
+                    | Command::ShowIpNatStatistics
+                    | Command::ClearNatTranslations
                     | Command::SaveConfig
                     | Command::Ping(_)
             ) {
@@ -438,28 +445,11 @@ fn parse_input(
         DhcpDefaultRouter => Command::SetDhcpDefaultRouter(parse_ip(0)?),
         NatInside => Command::SetNatRole(NatRole::Inside),
         NatOutside => Command::SetNatRole(NatRole::Outside),
-        NatOverload => {
-            if args.len() < 5 {
-                return Err(ParseError::Incomplete);
-            }
-            if args.len() > 6 {
-                return Err(invalid(args[6].offset, "unexpected argument"));
-            }
-            unique_choice(&args[0], &["list"])?;
-            let access_list = parse_access_list_id(&args[1])?;
-            unique_choice(&args[2], &["interface"])?;
-            unique_choice(args.last().unwrap(), &["overload"])?;
-            let value = args[3..args.len() - 1]
-                .iter()
-                .map(|token| token.text)
-                .collect::<String>();
-            let (outside_interface, _) = canonical_interface(&value)
-                .map_err(|error| invalid(args[3].offset, error.to_string()))?;
-            Command::SetNatOverload {
-                access_list,
-                outside_interface,
-            }
-        }
+        NatOverload => nat::dynamic(args)?,
+        NatStatic => nat::static_rule(args)?,
+        NatPool => nat::pool(args)?,
+        ShowNatStatistics => Command::ShowIpNatStatistics,
+        ClearNatTranslations => Command::ClearNatTranslations,
         Dot1q => {
             if args.len() > 2 {
                 return Err(invalid(args[2].offset, "unexpected argument"));
@@ -672,7 +662,7 @@ pub fn suggestions(
     }
     let mut result = Vec::new();
     for child in &node.children {
-        if child.word.starts_with(&partial.to_ascii_lowercase()) {
+        if used == complete.len() && child.word.starts_with(&partial.to_ascii_lowercase()) {
             result.push(Suggestion {
                 word: child.word.into(),
                 help: child.help.into(),
@@ -681,7 +671,13 @@ pub fn suggestions(
         }
     }
     if !result.is_empty() {
-        if node.action.is_some() && partial.is_empty() {
+        if matches!(node.action, Some(Action::NatOverload)) {
+            result.extend(nat::suggest(Action::NatOverload, &[], partial, start)?);
+        }
+        if node.action.is_some()
+            && partial.is_empty()
+            && parse_configuration(input.trim_end(), mode).is_ok()
+        {
             result.push(Suggestion {
                 word: "<cr>".into(),
                 help: String::new(),
@@ -857,11 +853,9 @@ pub fn suggestions(
                     "<wildcard>"
                 }
                 Action::AccessGroup if args.len() == 1 => "in|out",
-                Action::NatOverload if args.is_empty() => "list",
-                Action::NatOverload if args.len() == 1 => "<1-99>",
-                Action::NatOverload if args.len() == 2 => "interface",
-                Action::NatOverload if args.len() == 3 => "<interface>",
-                Action::NatOverload if args.len() == 4 => "overload",
+                Action::NatStatic | Action::NatPool | Action::NatOverload => {
+                    return nat::suggest(action, args, partial, start);
+                }
                 Action::NamedStandardAcl | Action::NamedExtendedAcl | Action::NoAclSequence
                     if args.is_empty() =>
                 {

@@ -300,3 +300,26 @@ exponential backoff, expire idle connections after 300 seconds, and retain
 TIME-WAIT for 120 seconds. This is a deliberately limited educational TCP stack:
 sliding windows, congestion algorithms, SACK, simultaneous open, option negotiation,
 and out-of-order reassembly remain beyond this initial implementation.
+
+### NAT expansion
+
+NAT now supports TCP/UDP PAT, ICMP echo identifier translation, static address
+mapping, static TCP/UDP port mapping, and bounded dynamic address pools. TCP
+rewrites recompute the IPv4 pseudoheader checksum. Pool selection and PAT ports
+are deterministic; exhausted allocation drops traffic with `NatFailed`.
+Outside interfaces answer ARP for static global addresses and active allocations.
+The wire behavior follows [traditional NAT](https://www.rfc-editor.org/rfc/rfc3022).
+
+Configure `ip nat pool NAME FIRST LAST netmask MASK`,
+`ip nat inside source list 1 pool NAME [overload]`, or
+`ip nat inside source static [tcp|udp] ...`. Existing interface overload syntax
+continues working. `show ip nat statistics` reports cumulative accounting;
+`clear ip nat translation *` removes dynamic entries while preserving static
+configuration. Rendered configuration replays through the command engine.
+
+Dynamic transport entries expire after 60 seconds of inactivity, using simulation
+time. One dynamic source policy is active per device. ICMP error quotation
+rewriting, application gateways, hairpin NAT, and fragmented transport translation
+remain unsupported. Tests cover TCP sessions in both directions through PAT,
+outside-initiated static port forwarding, proxy ARP, ICMP through static/pool NAT,
+pool exhaustion, expiration, and CLI/configuration replay.

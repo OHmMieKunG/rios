@@ -762,3 +762,59 @@ fn named_and_numbered_extended_acls_parse_help_replay_and_delete() {
     assert!(parse("40 permit tcp any any range 2000 1000", session.mode).is_err());
     assert!(parse("40 permit ip any any eq 80", session.mode).is_err());
 }
+
+#[test]
+fn expanded_nat_config_replays_with_help_and_operational_commands() {
+    let mut router = Device::standalone();
+    let mut session = CliSession {
+        mode: CliMode::GlobalConfiguration,
+    };
+    for line in [
+        "access-list 1 permit 10.0.0.0 0.0.0.255",
+        "ip nat pool PUBLIC 203.0.113.10 203.0.113.20 netmask 255.255.255.0",
+        "ip nat in so l 1 p PUBLIC ov",
+        "ip nat in so st 10.0.0.2 203.0.113.2",
+        "ip nat in so st t 10.0.0.3 80 203.0.113.3 8080",
+        "ip nat in so st u 10.0.0.4 53 203.0.113.4 53",
+    ] {
+        run(&mut router, &mut session, line).unwrap();
+    }
+    assert!(
+        run(&mut router, &mut session, "do sh ip nat st")
+            .unwrap()
+            .output
+            .contains("3 static")
+    );
+    let rendered = router.running_config().render();
+    let mut restored = Device::standalone();
+    load_configuration(&mut restored, &rendered).unwrap();
+    assert_eq!(restored.running_config(), router.running_config());
+    run(&mut router, &mut session, "end").unwrap();
+    run(&mut router, &mut session, "cl ip nat tr *").unwrap();
+    assert!(
+        run(&mut router, &mut session, "sh ip nat tr")
+            .unwrap()
+            .output
+            .contains("203.0.113.3:8080")
+    );
+    for (input, expected) in [
+        ("ip nat inside source static tcp 10.0.0.3 ", "<local-port>"),
+        ("ip nat inside source static 10.0.0.2 ", "<global>"),
+        ("ip nat pool PUBLIC 203.0.113.10 203.0.113.20 ", "netmask"),
+        ("ip nat inside source list 1 pool PUBLIC ", "overload"),
+    ] {
+        assert!(
+            suggestions(input, CliMode::GlobalConfiguration, &[])
+                .unwrap()
+                .iter()
+                .any(|item| item.word == expected)
+        );
+    }
+    assert!(
+        parse(
+            "ip nat inside source static tcp 10.0.0.3 0 203.0.113.3 80",
+            CliMode::GlobalConfiguration
+        )
+        .is_err()
+    );
+}

@@ -61,6 +61,8 @@ fn executable_after_do(command: &Command) -> bool {
             | Command::ShowAccessLists
             | Command::ShowIpDhcpBinding
             | Command::ShowIpNatTranslations
+            | Command::ShowIpNatStatistics
+            | Command::ClearNatTranslations
             | Command::SaveConfig
             | Command::Ping(_)
     )
@@ -106,7 +108,8 @@ pub fn execute_at(
         | Command::ConfigureTerminal
         | Command::ShowRunningConfig
         | Command::ShowStartupConfig
-        | Command::SaveConfig => mode == PrivilegedExec,
+        | Command::SaveConfig
+        | Command::ClearNatTranslations => mode == PrivilegedExec,
         Command::Hostname(_) | Command::EnterAccessList { .. } | Command::AddNumberedAcl { .. } => {
             mode == GlobalConfiguration
         }
@@ -124,7 +127,10 @@ pub fn execute_at(
         | Command::RemoveVlan(_) => mode == GlobalConfiguration,
         Command::AddStandardAccessList { .. } => mode == GlobalConfiguration,
         Command::EnterDhcpPool(_) => mode == GlobalConfiguration,
-        Command::SetNatOverload { .. } => mode == GlobalConfiguration,
+        Command::SetNatOverload { .. }
+        | Command::AddStaticNat(_)
+        | Command::SetNatPool { .. }
+        | Command::SetNatPoolRule(_) => mode == GlobalConfiguration,
         Command::SetDhcpPoolNetwork(_) | Command::SetDhcpDefaultRouter(_) => {
             matches!(mode, DhcpPoolConfiguration(_))
         }
@@ -178,6 +184,7 @@ pub fn execute_at(
         | Command::ShowAccessLists
         | Command::ShowIpDhcpBinding
         | Command::ShowIpNatTranslations
+        | Command::ShowIpNatStatistics
         | Command::Ping(_) => exec_mode,
         Command::NetworkUnavailable(feature) => match feature {
             NetworkFeature::DebugPacket | NetworkFeature::DebugArp | NetworkFeature::DebugIcmp => {
@@ -296,6 +303,11 @@ pub fn execute_at(
                 device.set_nat_role(interface, role)?;
             }
         }
+        Command::AddStaticNat(rule) => device.add_static_nat(rule)?,
+        Command::SetNatPool { name, pool } => device.set_nat_pool(&name, pool)?,
+        Command::SetNatPoolRule(rule) => device.set_nat_pool_rule(rule)?,
+        Command::ClearNatTranslations => device.clear_nat_translations(),
+        Command::ShowIpNatStatistics => result.output = device.show_ip_nat_statistics(now),
         Command::SetNatOverload {
             access_list,
             outside_interface,

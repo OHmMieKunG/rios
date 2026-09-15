@@ -144,6 +144,14 @@ pub enum Command {
     SetDhcpPoolNetwork(Ipv4Network),
     SetDhcpDefaultRouter(Ipv4Addr),
     SetNatRole(NatRole),
+    AddStaticNat(rios_config::StaticNat),
+    SetNatPool {
+        name: String,
+        pool: rios_config::NatPool,
+    },
+    SetNatPoolRule(rios_config::NatPoolRule),
+    ShowIpNatStatistics,
+    ClearNatTranslations,
     SetNatOverload {
         access_list: AccessListId,
         outside_interface: String,

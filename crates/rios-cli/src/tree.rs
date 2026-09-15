@@ -29,6 +29,10 @@ pub(crate) enum Action {
     NatInside,
     NatOutside,
     NatOverload,
+    NatStatic,
+    NatPool,
+    ShowNatStatistics,
+    ClearNatTranslations,
     Vlan,
     NoVlan,
     VlanName,
@@ -91,6 +95,8 @@ impl Action {
             Self::DhcpPool => &["<name>"],
             Self::DhcpNetwork => &["<network> <mask>"],
             Self::DhcpDefaultRouter => &["<address>"],
+            Self::NatStatic => &["<local>|tcp|udp"],
+            Self::NatPool => &["<name> <first> <last> netmask <mask>"],
             Self::NatOverload => &["list <1-99> interface <interface> overload"],
             Self::Vlan
             | Self::NoVlan
@@ -218,6 +224,15 @@ pub(crate) fn tree(mode: CliMode) -> Node {
                 ],
                 ShowNatTranslations,
             );
+            root.add(
+                &[
+                    ("show", ""),
+                    ("ip", ""),
+                    ("nat", ""),
+                    ("statistics", "NAT counters"),
+                ],
+                ShowNatStatistics,
+            );
             for (word, help, action) in [
                 ("neighbor", "OSPF neighbors", OspfNeighbor),
                 ("interface", "OSPF interfaces", OspfInterface),
@@ -237,6 +252,16 @@ pub(crate) fn tree(mode: CliMode) -> Node {
             if mode == CliMode::UserExec {
                 root.add(&[("enable", "Enter privileged EXEC")], Enable);
             } else {
+                root.add(
+                    &[
+                        ("clear", "Reset operational state"),
+                        ("ip", ""),
+                        ("nat", ""),
+                        ("translation", "Clear dynamic translations"),
+                        ("*", "All dynamic translations"),
+                    ],
+                    ClearNatTranslations,
+                );
                 root.add(&[("disable", "Leave privileged EXEC")], Disable);
                 root.add(
                     &[
@@ -369,6 +394,24 @@ pub(crate) fn tree(mode: CliMode) -> Node {
                         ("source", "Dynamic source translation"),
                     ],
                     NatOverload,
+                );
+                root.add(
+                    &[
+                        ("ip", ""),
+                        ("nat", ""),
+                        ("inside", ""),
+                        ("source", ""),
+                        ("static", "Static address or port mapping"),
+                    ],
+                    NatStatic,
+                );
+                root.add(
+                    &[
+                        ("ip", ""),
+                        ("nat", ""),
+                        ("pool", "Define global address pool"),
+                    ],
+                    NatPool,
                 );
                 root.add(
                     &[("router", "Enable a routing process"), ("ospf", "OSPFv2")],
