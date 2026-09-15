@@ -158,3 +158,81 @@ fn closed_port_resets_and_failed_connections_expire() {
             .contains_key(&socket)
     );
 }
+
+#[test]
+fn protocol_owned_idle_timeout_backpressure_and_abort_use_real_tcp_state() {
+    let (mut lab, a, b) = setup();
+    lab.tcp_listen(b, 179).unwrap();
+    let pinned = lab
+        .tcp_connect(a, 50000, "10.0.0.2".parse().unwrap(), 179)
+        .unwrap();
+    let ordinary = lab
+        .tcp_connect(a, 50001, "10.0.0.2".parse().unwrap(), 179)
+        .unwrap();
+    lab.run_until(SimTime::from_millis(20)).unwrap();
+    for (device, socket) in [(a, pinned), (b, reverse(pinned))] {
+        lab.with_device_mut(device, |d| d.tcp_set_idle_timeout(socket, None).unwrap())
+            .unwrap();
+        assert_eq!(
+            lab.device(device).unwrap().tcp_connections()[&socket].send_capacity(),
+            1200
+        );
+    }
+    lab.tcp_send(a, pinned, b"bgp").unwrap();
+    assert_eq!(
+        lab.device(a).unwrap().tcp_connections()[&pinned].send_capacity(),
+        0
+    );
+    lab.run_until(SimTime::from_millis(30)).unwrap();
+    assert_eq!(
+        lab.device(b).unwrap().tcp_connections()[&reverse(pinned)].received_len(),
+        3
+    );
+    assert_eq!(lab.tcp_read(b, reverse(pinned)).unwrap(), b"bgp");
+    lab.run_until(SimTime::from_millis(301_000)).unwrap();
+    assert!(
+        !lab.device(a)
+            .unwrap()
+            .tcp_connections()
+            .contains_key(&ordinary)
+    );
+    assert_eq!(
+        lab.device(a).unwrap().tcp_connections()[&pinned].state,
+        TcpState::Established
+    );
+    lab.tcp_abort(a, pinned).unwrap();
+    let events = lab.run_until(SimTime::from_millis(301_010)).unwrap();
+    assert!(events.iter().any(|event| {
+        let EventOutcome::FrameReceived { frame, .. } = event else {
+            return false;
+        };
+        let Ok(packet) = Ipv4Packet::decode(&frame.payload) else {
+            return false;
+        };
+        TcpSegment::decode(packet.source, packet.destination, &packet.payload)
+            .is_ok_and(|segment| segment.flags.contains(TcpFlags::RST))
+    }));
+    assert!(
+        !lab.device(a)
+            .unwrap()
+            .tcp_connections()
+            .contains_key(&pinned)
+    );
+    // A due transport timer may already reclaim the closed peer after receiving RST.
+    assert!(
+        lab.device(b)
+            .unwrap()
+            .tcp_connections()
+            .get(&reverse(pinned))
+            .is_none_or(|connection| connection.state == TcpState::Closed)
+    );
+    lab.with_device_mut(b, |d| d.tcp_unlisten(179)).unwrap();
+    let refused = lab
+        .tcp_connect(a, 50002, "10.0.0.2".parse().unwrap(), 179)
+        .unwrap();
+    lab.run_until(SimTime::from_millis(301_020)).unwrap();
+    assert_eq!(
+        lab.device(a).unwrap().tcp_connections()[&refused].state,
+        TcpState::Closed
+    );
+}

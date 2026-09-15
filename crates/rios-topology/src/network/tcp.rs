@@ -65,6 +65,16 @@ impl Lab {
         self.send_ipv4_packet(device, packet)?;
         Ok(bytes)
     }
+    /// Abort a stream with a simulated RST; no operating-system socket is involved.
+    pub fn tcp_abort(&mut self, device: DeviceId, socket: TcpSocket) -> Result<(), LabError> {
+        let packet = self
+            .devices
+            .get_mut(&device)
+            .ok_or_else(|| LabError::UnknownDevice(device.0.to_string()))?
+            .tcp_abort(socket)?;
+        self.send_ipv4_packet(device, packet)?;
+        Ok(())
+    }
     /// Close a stream using simulated FIN and ACK packets.
     pub fn tcp_close(&mut self, device: DeviceId, socket: TcpSocket) -> Result<(), LabError> {
         let now = self.now();

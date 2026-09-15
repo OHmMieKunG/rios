@@ -67,6 +67,7 @@ pub struct TcpConnection {
     received: Vec<u8>,
     outstanding: Option<Outstanding>,
     last_activity: SimTime,
+    idle_timeout_us: Option<u64>,
     time_wait_until: Option<SimTime>,
     peer_closed: bool,
 }
@@ -77,6 +78,21 @@ pub(crate) struct TcpRuntime {
     next_sequence: u32,
 }
 impl TcpConnection {
+    /// Bytes currently available without changing the advertised receive window.
+    pub fn received_len(&self) -> usize {
+        self.received.len()
+    }
+    /// Maximum next application write; zero means wait for state, ACK or peer window.
+    pub fn send_capacity(&self) -> usize {
+        if !matches!(self.state, TcpState::Established | TcpState::CloseWait)
+            || self.outstanding.is_some()
+        {
+            0
+        } else {
+            MAX_PAYLOAD.min(usize::from(self.peer_window))
+        }
+    }
+
     fn new(sequence: u32, now: SimTime) -> Self {
         Self {
             state: TcpState::Closed,
@@ -87,6 +103,7 @@ impl TcpConnection {
             received: Vec::new(),
             outstanding: None,
             last_activity: now,
+            idle_timeout_us: Some(IDLE_US),
             time_wait_until: None,
             peer_closed: false,
         }
@@ -241,6 +258,35 @@ impl Device {
         self.tcp.listeners.insert(port);
         Ok(())
     }
+    /// Remove a listener without disturbing its existing connections.
+    pub fn tcp_unlisten(&mut self, port: u16) {
+        self.tcp.listeners.remove(&port);
+    }
+    /// Let protocols with their own liveness timers retain a bounded connection while idle.
+    pub fn tcp_set_idle_timeout(
+        &mut self,
+        socket: TcpSocket,
+        timeout_us: Option<u64>,
+    ) -> Result<(), TcpError> {
+        self.tcp
+            .connections
+            .get_mut(&socket)
+            .ok_or(TcpError::Missing)?
+            .idle_timeout_us = timeout_us;
+        Ok(())
+    }
+    /// Abort a simulated transport, releasing its buffers and returning a real RST segment.
+    pub fn tcp_abort(&mut self, socket: TcpSocket) -> Result<Ipv4Packet, TcpError> {
+        let connection = self
+            .tcp
+            .connections
+            .remove(&socket)
+            .ok_or(TcpError::Missing)?;
+        packet(
+            socket,
+            connection.segment(socket, Flags::RST | Flags::ACK, Vec::new()),
+        )
+    }
     /// Read-only connection state for services and diagnostics.
     pub fn tcp_connections(&self) -> &BTreeMap<TcpSocket, TcpConnection> {
         &self.tcp.connections
@@ -381,7 +427,9 @@ impl Device {
         let mut outgoing = Vec::new();
         self.tcp.connections.retain(|_, connection| {
             connection.state != TcpState::Closed
-                && now.0.saturating_sub(connection.last_activity.0) < IDLE_US
+                && connection.idle_timeout_us.is_none_or(|timeout| {
+                    now.0.saturating_sub(connection.last_activity.0) < timeout
+                })
                 && connection
                     .time_wait_until
                     .is_none_or(|deadline| deadline > now)
