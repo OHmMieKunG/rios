@@ -1,0 +1,14 @@
+[package]
+name = "rios-device"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rios-simulator.workspace = true
+rios-ethernet.workspace = true
+rios-ipv4.workspace = true
+rios-config.workspace = true
+rios-routing.workspace = true
+rios-switching.workspace = true
+rios-protocol.workspace = true
+thiserror.workspace = true

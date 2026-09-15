@@ -1,0 +1,12 @@
+enable
+configure terminal
+hostname EDGE-R1
+interface gigabitEthernet0/0
+ip address 10.0.0.1 255.255.255.0
+no shutdown
+end
+show ip interface brief
+show running-config
+write memory
+show startup-config
+exit

@@ -1,0 +1,45 @@
+[package]
+name = "rios"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+rios-simulator = { path = "crates/rios-simulator" }
+rios-ethernet = { path = "crates/rios-ethernet" }
+rios-ipv4 = { path = "crates/rios-ipv4" }
+rios-protocol = { path = "crates/rios-protocol" }
+rios-config = { path = "crates/rios-config" }
+rios-device = { path = "crates/rios-device" }
+rios-cli = { path = "crates/rios-cli" }
+rios-topology = { path = "crates/rios-topology" }
+rios-routing = { path = "crates/rios-routing" }
+rios-switching = { path = "crates/rios-switching" }
+
+[dependencies]
+rios-topology.workspace = true
+rios-simulator.workspace = true
+rios-cli.workspace = true
+rios-device.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+clap = { version = "4", features = ["derive"] }
+rustyline = { version = "18", features = ["custom-bindings"] }
+rand = "0.10"
+russh = { version = "0.63.3", default-features = false, features = ["ring"] }
+serde_json = "1"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+panic = "abort"
+strip = "symbols"

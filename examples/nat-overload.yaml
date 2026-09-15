@@ -1,0 +1,13 @@
+devices:
+  H1:
+    type: host
+    interfaces: [GigabitEthernet0/0]
+  R1:
+    type: router
+    interfaces: [GigabitEthernet0/0, GigabitEthernet0/1]
+  H2:
+    type: host
+    interfaces: [GigabitEthernet0/0]
+links:
+  - endpoints: [H1:GigabitEthernet0/0, R1:GigabitEthernet0/0]
+  - endpoints: [R1:GigabitEthernet0/1, H2:GigabitEthernet0/0]

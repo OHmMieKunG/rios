@@ -1,0 +1,16 @@
+devices:
+  R1:
+    type: router
+    interfaces:
+      - GigabitEthernet0/0
+      - GigabitEthernet0/1
+  R2:
+    type: router
+    interfaces:
+      - GigabitEthernet0/0
+      - GigabitEthernet0/1
+links:
+  - endpoints:
+      - R1:GigabitEthernet0/0
+      - R2:GigabitEthernet0/0
+    delay_ms: 1

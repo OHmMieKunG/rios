@@ -1,0 +1,23 @@
+connect R1
+enable
+configure terminal
+interface GigabitEthernet0/0
+ip address 10.0.0.1 255.255.255.0
+no shutdown
+end
+exit
+connect R2
+enable
+configure terminal
+interface GigabitEthernet0/0
+ip address 10.0.0.2 255.255.255.0
+no shutdown
+end
+exit
+connect R1
+enable
+show ip route
+ping 10.0.0.2
+show arp
+exit
+exit

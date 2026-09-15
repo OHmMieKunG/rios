@@ -1,0 +1,9 @@
+[package]
+name = "rios-ipv4"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+rios-simulator.workspace = true

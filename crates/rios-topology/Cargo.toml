@@ -1,0 +1,17 @@
+[package]
+name = "rios-topology"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rios-simulator.workspace = true
+rios-ethernet.workspace = true
+rios-device.workspace = true
+rios-config.workspace = true
+rios-ipv4.workspace = true
+rios-protocol.workspace = true
+rios-routing.workspace = true
+rios-switching.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+serde-saphyr = { version = "1.2", default-features = false, features = ["deserialize"] }

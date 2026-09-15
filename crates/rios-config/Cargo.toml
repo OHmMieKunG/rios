@@ -1,0 +1,10 @@
+[package]
+name = "rios-config"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rios-simulator.workspace = true
+rios-ipv4.workspace = true
+rios-ethernet.workspace = true
+serde.workspace = true

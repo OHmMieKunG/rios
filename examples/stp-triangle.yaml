@@ -1,0 +1,22 @@
+devices:
+  H1:
+    type: host
+    interfaces: [GigabitEthernet0/0]
+  H2:
+    type: host
+    interfaces: [GigabitEthernet0/0]
+  SW1:
+    type: switch
+    interfaces: [GigabitEthernet0/1, GigabitEthernet0/2, GigabitEthernet0/3]
+  SW2:
+    type: switch
+    interfaces: [GigabitEthernet0/1, GigabitEthernet0/2, GigabitEthernet0/3]
+  SW3:
+    type: switch
+    interfaces: [GigabitEthernet0/2, GigabitEthernet0/3]
+links:
+  - endpoints: [H1:GigabitEthernet0/0, SW1:GigabitEthernet0/1]
+  - endpoints: [H2:GigabitEthernet0/0, SW2:GigabitEthernet0/1]
+  - endpoints: [SW1:GigabitEthernet0/2, SW2:GigabitEthernet0/2]
+  - endpoints: [SW2:GigabitEthernet0/3, SW3:GigabitEthernet0/2]
+  - endpoints: [SW3:GigabitEthernet0/3, SW1:GigabitEthernet0/3]
