@@ -1,4 +1,5 @@
 mod acl;
+mod dhcp;
 mod nat;
 use crate::{
     tree::{Action, Node, tree},
@@ -170,6 +171,9 @@ fn parse_input(
         | Action::Do
         | Action::Dot1q => usize::MAX,
         Action::StaticRoute | Action::NoStaticRoute => 3,
+        Action::DhcpLease | Action::DhcpDns | Action::DhcpExcluded => usize::MAX,
+        Action::DhcpHost => 2,
+        Action::DhcpDomain | Action::DhcpHardware | Action::DhcpHelper => 1,
         Action::NatPool => 5,
         Action::AccessGroup => 2,
         Action::DhcpNetwork => 2,
@@ -443,6 +447,10 @@ fn parse_input(
             Command::SetDhcpPoolNetwork(Ipv4Network::new(address, configured.prefix_len()).unwrap())
         }
         DhcpDefaultRouter => Command::SetDhcpDefaultRouter(parse_ip(0)?),
+        DhcpLease | DhcpDns | DhcpDomain | DhcpHost | DhcpHardware | DhcpExcluded | DhcpHelper => {
+            dhcp::command(action, args)?
+        }
+
         NatInside => Command::SetNatRole(NatRole::Inside),
         NatOutside => Command::SetNatRole(NatRole::Outside),
         NatOverload => nat::dynamic(args)?,
@@ -819,6 +827,15 @@ pub fn suggestions(
                 return Err(invalid(args[0].offset, "expected an IPv4 address"));
             }
             let help = match action {
+                Action::DhcpLease
+                | Action::DhcpDns
+                | Action::DhcpDomain
+                | Action::DhcpHost
+                | Action::DhcpHardware
+                | Action::DhcpExcluded
+                | Action::DhcpHelper => {
+                    return dhcp::suggest(action, args, partial, start);
+                }
                 Action::Dot1q if args.is_empty() => "<vlan-id>",
                 Action::Dot1q if args.len() == 1 => {
                     parse_configuration(input[..start].trim_end(), mode)?;

@@ -26,6 +26,13 @@ pub(crate) enum Action {
     DhcpPool,
     DhcpNetwork,
     DhcpDefaultRouter,
+    DhcpLease,
+    DhcpDns,
+    DhcpDomain,
+    DhcpHost,
+    DhcpHardware,
+    DhcpExcluded,
+    DhcpHelper,
     NatInside,
     NatOutside,
     NatOverload,
@@ -94,6 +101,13 @@ impl Action {
             Self::AccessGroup => &["<1-99> in|out"],
             Self::DhcpPool => &["<name>"],
             Self::DhcpNetwork => &["<network> <mask>"],
+            Self::DhcpLease => &["<days> [hours] [minutes]"],
+            Self::DhcpDns => &["<address> [address ...]"],
+            Self::DhcpDomain => &["<domain>"],
+            Self::DhcpHost => &["<address> <mask>"],
+            Self::DhcpHardware => &["<mac-address>"],
+            Self::DhcpExcluded => &["<first> [last]"],
+            Self::DhcpHelper => &["<address>"],
             Self::DhcpDefaultRouter => &["<address>"],
             Self::NatStatic => &["<local>|tcp|udp"],
             Self::NatPool => &["<name> <first> <last> netmask <mask>"],
@@ -381,6 +395,14 @@ pub(crate) fn tree(mode: CliMode) -> Node {
                 root.add(
                     &[
                         ("ip", ""),
+                        ("dhcp", ""),
+                        ("excluded-address", "Exclude allocation range"),
+                    ],
+                    DhcpExcluded,
+                );
+                root.add(
+                    &[
+                        ("ip", ""),
                         ("dhcp", "DHCP server configuration"),
                         ("pool", "Configure a DHCP pool"),
                     ],
@@ -430,8 +452,26 @@ pub(crate) fn tree(mode: CliMode) -> Node {
                     OspfNetwork,
                 );
             }
+            if matches!(
+                mode,
+                CliMode::InterfaceConfiguration(_) | CliMode::SubinterfaceConfiguration(_)
+            ) {
+                root.add(
+                    &[("ip", ""), ("helper-address", "DHCP relay server")],
+                    DhcpHelper,
+                );
+            }
             if matches!(mode, CliMode::DhcpPoolConfiguration(_)) {
                 root.add(&[("network", "Set the pool network")], DhcpNetwork);
+                for (word, help, action) in [
+                    ("lease", "Lease duration", DhcpLease),
+                    ("dns-server", "DNS servers", DhcpDns),
+                    ("domain-name", "Client domain", DhcpDomain),
+                    ("host", "Reserved address", DhcpHost),
+                    ("hardware-address", "Reservation client MAC", DhcpHardware),
+                ] {
+                    root.add(&[(word, help)], action);
+                }
                 root.add(
                     &[("default-router", "Set the default gateway option")],
                     DhcpDefaultRouter,

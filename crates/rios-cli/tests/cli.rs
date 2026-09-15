@@ -818,3 +818,58 @@ fn expanded_nat_config_replays_with_help_and_operational_commands() {
         .is_err()
     );
 }
+
+#[test]
+fn dhcp_options_reservations_and_helper_replay() {
+    let mut router = Device::standalone();
+    let mut session = CliSession {
+        mode: CliMode::GlobalConfiguration,
+    };
+    for line in [
+        "ip dhcp excluded-address 10.10.0.1 10.10.0.19",
+        "ip dhcp pool CLIENT",
+        "network 10.10.0.0 255.255.255.0",
+        "default-router 10.10.0.1",
+        "lease 0 0 1",
+        "dns-server 10.100.0.10 1.1.1.1",
+        "domain-name lab.test",
+        "host 10.10.0.99 255.255.255.0",
+        "hardware-address 02:00:00:00:00:01",
+        "exit",
+        "interface gi0/0",
+        "ip helper-address 10.100.0.10",
+    ] {
+        run(&mut router, &mut session, line).unwrap();
+    }
+    let rendered = router.running_config().render();
+    let mut restored = Device::standalone();
+    load_configuration(&mut restored, &rendered).unwrap();
+    assert_eq!(restored.running_config(), router.running_config());
+    for (input, mode, hint) in [
+        (
+            "ip dhcp excluded-address 10.10.0.1 ",
+            CliMode::GlobalConfiguration,
+            "<last>",
+        ),
+        (
+            "lease 0 1 ",
+            CliMode::DhcpPoolConfiguration(rios_config::DhcpPoolId(1)),
+            "<minutes>",
+        ),
+        ("ip helper-address ", session.mode, "<address>"),
+    ] {
+        assert!(
+            suggestions(input, mode, &[])
+                .unwrap()
+                .iter()
+                .any(|item| item.word == hint)
+        );
+    }
+    assert!(
+        parse(
+            "lease 0 24",
+            CliMode::DhcpPoolConfiguration(rios_config::DhcpPoolId(1))
+        )
+        .is_err()
+    );
+}

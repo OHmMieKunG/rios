@@ -87,6 +87,15 @@ pub enum NetworkFeature {
     DebugArp,
     DebugIcmp,
 }
+/// One DHCP pool option, applied through shared device validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DhcpPoolOption {
+    Lease(u32),
+    Dns(Vec<Ipv4Addr>),
+    Domain(String),
+    Host(Ipv4InterfaceConfig),
+    Hardware(rios_ethernet::MacAddress),
+}
 /// Validated syntax, independent of state mutation and terminal I/O.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
@@ -143,6 +152,12 @@ pub enum Command {
     EnterDhcpPool(String),
     SetDhcpPoolNetwork(Ipv4Network),
     SetDhcpDefaultRouter(Ipv4Addr),
+    SetDhcpPoolOption(DhcpPoolOption),
+    ExcludeDhcpAddresses {
+        first: Ipv4Addr,
+        last: Ipv4Addr,
+    },
+    SetDhcpHelper(Ipv4Addr),
     SetNatRole(NatRole),
     AddStaticNat(rios_config::StaticNat),
     SetNatPool {

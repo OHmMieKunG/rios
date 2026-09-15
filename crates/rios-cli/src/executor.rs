@@ -131,7 +131,10 @@ pub fn execute_at(
         | Command::AddStaticNat(_)
         | Command::SetNatPool { .. }
         | Command::SetNatPoolRule(_) => mode == GlobalConfiguration,
-        Command::SetDhcpPoolNetwork(_) | Command::SetDhcpDefaultRouter(_) => {
+        Command::ExcludeDhcpAddresses { .. } => mode == GlobalConfiguration,
+        Command::SetDhcpPoolNetwork(_)
+        | Command::SetDhcpDefaultRouter(_)
+        | Command::SetDhcpPoolOption(_) => {
             matches!(mode, DhcpPoolConfiguration(_))
         }
         Command::EnterVlan(_) => matches!(mode, GlobalConfiguration | VlanConfiguration(_)),
@@ -160,7 +163,8 @@ pub fn execute_at(
         | Command::SetIpv4Dhcp
         | Command::SetDot1q { .. }
         | Command::NoIpv4Address
-        | Command::SetNatRole(_) => {
+        | Command::SetNatRole(_)
+        | Command::SetDhcpHelper(_) => {
             matches!(
                 mode,
                 InterfaceConfiguration(_) | SubinterfaceConfiguration(_)
@@ -291,6 +295,33 @@ pub fn execute_at(
         Command::SetDhcpPoolNetwork(network) => {
             if let DhcpPoolConfiguration(id) = mode {
                 device.set_dhcp_pool_network(id, network)?;
+            }
+        }
+        Command::SetDhcpHelper(address) => {
+            edit_interfaces(device, mode, |device, interface| {
+                device.set_dhcp_helper(interface, address)
+            })?;
+        }
+        Command::ExcludeDhcpAddresses { first, last } => {
+            device.exclude_dhcp_addresses(first, last)?
+        }
+        Command::SetDhcpPoolOption(option) => {
+            if let DhcpPoolConfiguration(id) = mode {
+                let mut config = device.running_config().dhcp_pools[&id].clone();
+                match option {
+                    DhcpPoolOption::Lease(seconds) => config.lease_seconds = seconds,
+                    DhcpPoolOption::Dns(addresses) => config.dns_servers = addresses,
+                    DhcpPoolOption::Domain(name) => config.domain_name = Some(name),
+                    DhcpPoolOption::Host(ip) => {
+                        config.network = Some(
+                            Ipv4Network::new(ip.address(), ip.prefix_len())
+                                .map_err(|_| DeviceError::InvalidDhcpNetwork)?,
+                        );
+                        config.reserved_address = Some(ip.address());
+                    }
+                    DhcpPoolOption::Hardware(mac) => config.hardware_address = Some(mac),
+                }
+                device.update_dhcp_pool(id, config)?;
             }
         }
         Command::SetDhcpDefaultRouter(address) => {

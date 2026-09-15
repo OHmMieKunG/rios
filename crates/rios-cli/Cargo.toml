@@ -8,4 +8,5 @@ rios-simulator.workspace = true
 rios-ipv4.workspace = true
 rios-config.workspace = true
 rios-device.workspace = true
+rios-ethernet.workspace = true
 thiserror.workspace = true
