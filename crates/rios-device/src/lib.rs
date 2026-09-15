@@ -1,6 +1,7 @@
 //! Device inventory and validated state transitions, independent of CLI syntax.
 #![forbid(unsafe_code)]
 mod acl;
+mod channel;
 mod dhcp;
 mod display;
 mod ethernet;
@@ -52,6 +53,7 @@ pub enum InterfaceKind {
     GigabitEthernet,
     TenGigabitEthernet,
     EthernetSubinterface,
+    PortChannel,
     Serial,
     Console,
     Loopback,
@@ -67,7 +69,7 @@ impl InterfaceKind {
     pub fn is_physical(self) -> bool {
         !matches!(
             self,
-            Self::Loopback | Self::Vlan | Self::EthernetSubinterface
+            Self::Loopback | Self::Vlan | Self::EthernetSubinterface | Self::PortChannel
         )
     }
 }
@@ -165,6 +167,8 @@ struct StpInstance {
 /// Rejected state changes leave the device unchanged.
 #[derive(Debug, thiserror::Error)]
 pub enum DeviceError {
+    #[error("invalid EtherChannel member or incompatible port configuration")]
+    InvalidChannel,
     #[error("invalid access-list name, kind, sequence, or rule")]
     InvalidAccessList,
     #[error("access-list capacity exceeded")]
@@ -346,7 +350,10 @@ impl Device {
             InterfaceKind::TenGigabitEthernet => InterfaceMedia::SfpPlus,
             InterfaceKind::Serial => InterfaceMedia::Serial,
             InterfaceKind::Console => InterfaceMedia::Console,
-            InterfaceKind::Loopback | InterfaceKind::Vlan | InterfaceKind::EthernetSubinterface => {
+            InterfaceKind::Loopback
+            | InterfaceKind::Vlan
+            | InterfaceKind::EthernetSubinterface
+            | InterfaceKind::PortChannel => {
                 unreachable!()
             }
         };
@@ -406,6 +413,8 @@ impl Device {
         self.running_config.interfaces.insert(
             id,
             InterfaceConfig {
+                channel_group: None,
+                port_channel: None,
                 helper_address: None,
                 named_access_group_in: None,
                 named_access_group_out: None,
@@ -490,6 +499,9 @@ impl Device {
         if kind == InterfaceKind::EthernetSubinterface {
             return self.create_subinterface(&canonical);
         }
+        if kind == InterfaceKind::PortChannel {
+            return self.create_port_channel(&canonical);
+        }
         self.insert_interface(canonical, kind, InterfaceMedia::Virtual)
     }
     fn config_mut(&mut self, id: InterfaceId) -> Result<&mut InterfaceConfig, DeviceError> {
@@ -525,15 +537,14 @@ impl Device {
         }) {
             return Err(DeviceError::UnsupportedIpv4Interface);
         }
+        if self.channel_interface(id).is_some() {
+            return Err(DeviceError::InvalidChannel);
+        }
         if self
+            .running_config
             .interfaces
             .get(&id)
-            .is_some_and(|interface| interface.kind.is_ethernet())
-            && self
-                .running_config
-                .interfaces
-                .get(&id)
-                .is_some_and(|config| config.switchport.is_some())
+            .is_some_and(|config| config.switchport.is_some())
         {
             return Err(DeviceError::NotRoutedPort);
         }
@@ -615,10 +626,9 @@ impl Device {
     /// Put an Ethernet port into Layer 2 switchport mode.
     pub fn enable_switchport(&mut self, id: InterfaceId) -> Result<(), DeviceError> {
         if !self.supports_switching()
-            || !self
-                .interfaces
-                .get(&id)
-                .is_some_and(|interface| interface.kind.is_ethernet())
+            || !self.interfaces.get(&id).is_some_and(|interface| {
+                interface.kind.is_ethernet() || interface.kind == InterfaceKind::PortChannel
+            })
         {
             return Err(DeviceError::NotSwitchport);
         }
@@ -626,20 +636,21 @@ impl Device {
         config.ipv4 = None;
         config.dhcp_client = false;
         config.switchport.get_or_insert_default();
+        self.sync_channel_switchports(id);
         Ok(())
     }
 
     /// Put a Layer 3 switch Ethernet port into routed mode.
     pub fn disable_switchport(&mut self, id: InterfaceId) -> Result<(), DeviceError> {
         if self.device_type != DeviceType::Layer3Switch
-            || !self
-                .interfaces
-                .get(&id)
-                .is_some_and(|interface| interface.kind.is_ethernet())
+            || !self.interfaces.get(&id).is_some_and(|interface| {
+                interface.kind.is_ethernet() || interface.kind == InterfaceKind::PortChannel
+            })
         {
             return Err(DeviceError::NotRoutedPort);
         }
         self.config_mut(id)?.switchport = None;
+        self.sync_channel_switchports(id);
         self.mac_table.retain(|_, entry| entry.interface != id);
         Ok(())
     }
@@ -654,6 +665,7 @@ impl Device {
             self.enable_switchport(id)?;
         }
         self.switchport_mut(id)?.mode = mode;
+        self.sync_channel_switchports(id);
         self.mac_table.retain(|_, entry| entry.interface != id);
         Ok(())
     }
@@ -661,6 +673,7 @@ impl Device {
     /// Assign the untagged access VLAN for a physical switch port.
     pub fn set_access_vlan(&mut self, id: InterfaceId, vlan: VlanId) -> Result<(), DeviceError> {
         self.switchport_mut(id)?.access_vlan = vlan;
+        self.sync_channel_switchports(id);
         self.mac_table.retain(|_, entry| entry.interface != id);
         Ok(())
     }
@@ -672,6 +685,7 @@ impl Device {
         vlans: BTreeSet<VlanId>,
     ) -> Result<(), DeviceError> {
         self.switchport_mut(id)?.trunk_allowed_vlans = Some(vlans);
+        self.sync_channel_switchports(id);
         self.mac_table.retain(|_, entry| entry.interface != id);
         Ok(())
     }
@@ -772,8 +786,8 @@ impl Device {
                             let Some(switchport) = &config.switchport else {
                                 return false;
                             };
-                            config.admin_state == AdminState::Up
-                                && self.interfaces[port_id].link_state == LinkState::Up
+                            config.channel_group.is_none()
+                                && self.protocol_up(*port_id)
                                 && match switchport.mode {
                                     SwitchportMode::Access => switchport.access_vlan == vlan,
                                     SwitchportMode::Trunk => switchport
@@ -810,6 +824,7 @@ impl Device {
         self.running_config.interfaces[&id].admin_state == AdminState::Up
             && match interface.kind {
                 InterfaceKind::Loopback => true,
+                InterfaceKind::PortChannel => !self.channel_members(id).is_empty(),
                 InterfaceKind::EthernetSubinterface => self
                     .running_config
                     .interfaces
@@ -851,7 +866,12 @@ fn interface_sequence(name: &str) -> Option<(&str, u16)> {
 /// Normalize an unambiguous interface-family prefix and validate its numeric suffix.
 pub fn canonical_interface(input: &str) -> Result<(String, InterfaceKind), DeviceError> {
     let parts: Vec<_> = input.split_whitespace().collect();
-    if parts.len() > 2 || (parts.len() == 2 && !parts[0].bytes().all(|b| b.is_ascii_alphabetic())) {
+    if parts.len() > 2
+        || (parts.len() == 2
+            && !parts[0]
+                .bytes()
+                .all(|b| b.is_ascii_alphabetic() || b == b'-'))
+    {
         return Err(DeviceError::InvalidInterface(input.into()));
     }
     let compact: String = parts.concat();
@@ -885,6 +905,7 @@ pub fn canonical_interface(input: &str) -> Result<(String, InterfaceKind), Devic
         ("TenGigabitEthernet", InterfaceKind::TenGigabitEthernet),
         ("Serial", InterfaceKind::Serial),
         ("Console", InterfaceKind::Console),
+        ("Port-channel", InterfaceKind::PortChannel),
         ("Loopback", InterfaceKind::Loopback),
         ("Vlan", InterfaceKind::Vlan),
     ];
@@ -911,6 +932,7 @@ pub fn canonical_interface(input: &str) -> Result<(String, InterfaceKind), Devic
         | InterfaceKind::TenGigabitEthernet
         | InterfaceKind::Serial => (2..=3).contains(&numbers.len()),
         InterfaceKind::EthernetSubinterface => false,
+        InterfaceKind::PortChannel => numbers.len() == 1 && (1..=4096).contains(&numbers[0]),
         InterfaceKind::Console => numbers.len() == 1,
         InterfaceKind::Loopback => numbers.len() == 1,
         InterfaceKind::Vlan => numbers.len() == 1 && (1..=4094).contains(&numbers[0]),

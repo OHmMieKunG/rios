@@ -22,7 +22,7 @@ impl Device {
     fn stp_ports(&self) -> BTreeMap<VlanId, Vec<InterfaceId>> {
         let mut ports: BTreeMap<VlanId, Vec<InterfaceId>> = BTreeMap::new();
         for (id, interface) in &self.running_config.interfaces {
-            if !self.protocol_up(*id) {
+            if interface.channel_group.is_some() || !self.protocol_up(*id) {
                 continue;
             }
             let Some(switchport) = &interface.switchport else {

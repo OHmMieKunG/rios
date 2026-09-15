@@ -17,6 +17,8 @@ pub struct MacEntry {
 /// Observable reasons a virtual interface discards a frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, thiserror::Error)]
 pub enum DropReason {
+    #[error("EtherChannel member is not collecting or distributing")]
+    ChannelInactive,
     #[error("NAT allocation or translation failed")]
     NatFailed,
     #[error("transmit queue is full")]
@@ -153,6 +155,9 @@ impl Device {
         if receive
             && !self.is_switchport(id)
             && frame.destination != interface.mac_address
+            && !self
+                .channel_interface(id)
+                .is_some_and(|logical| self.interfaces[&logical].mac_address == frame.destination)
             && !frame.destination.is_multicast()
         {
             return Err(DropReason::NotForInterface);

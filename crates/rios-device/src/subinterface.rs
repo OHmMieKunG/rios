@@ -70,6 +70,7 @@ impl Device {
     /// Select the VLAN used for untagged traffic on a trunk.
     pub fn set_native_vlan(&mut self, id: InterfaceId, vlan: VlanId) -> Result<(), DeviceError> {
         self.switchport_mut(id)?.native_vlan = vlan;
+        self.sync_channel_switchports(id);
         self.mac_table.retain(|_, entry| entry.interface != id);
         Ok(())
     }

@@ -79,6 +79,31 @@ impl Lab {
         source: InterfaceRef,
         frame: EthernetFrame,
     ) -> Result<(), LabError> {
+        let source = if self
+            .device(source.device)?
+            .is_port_channel(source.interface)
+        {
+            let Some(member) = self
+                .device(source.device)?
+                .channel_egress(source.interface, &frame)
+            else {
+                self.devices
+                    .get_mut(&source.device)
+                    .ok_or(DropReason::NoLink)?
+                    .record_drop_reason(source.interface, DropReason::ChannelInactive)?;
+                return Ok(());
+            };
+            self.devices
+                .get_mut(&source.device)
+                .ok_or(DropReason::NoLink)?
+                .record_frame(source.interface, frame.len(), false)?;
+            InterfaceRef {
+                device: source.device,
+                interface: member,
+            }
+        } else {
+            source
+        };
         match self.transmit(source, frame) {
             Err(LabError::Dropped(_)) => Ok(()),
             other => other,
@@ -149,10 +174,12 @@ impl Lab {
                 learned.is_none_or(|entry| entry.interface == *port)
                     && device.protocol_up(*port)
                     && device.stp_forwarding(*port, vlan)
-                    && connected.contains_key(&InterfaceRef {
-                        device: source.device,
-                        interface: *port,
-                    })
+                    && device.channel_interface(*port).is_none()
+                    && (device.is_port_channel(*port)
+                        || connected.contains_key(&InterfaceRef {
+                            device: source.device,
+                            interface: *port,
+                        }))
             })
             .map(|interface| InterfaceRef {
                 device: source.device,
@@ -235,21 +262,43 @@ impl Lab {
                             .unwrap()
                             .record_frame(interface.interface, frame.len(), true)?;
                         self.trace_frame(interface, TraceAction::Rx, &frame);
+                        let logical_interface = match self
+                            .device(interface.device)?
+                            .channel_ingress(interface.interface)
+                        {
+                            Ok(logical) => InterfaceRef {
+                                device: interface.device,
+                                interface: logical,
+                            },
+                            Err(reason) => {
+                                self.devices
+                                    .get_mut(&interface.device)
+                                    .ok_or(reason)?
+                                    .record_drop_reason(interface.interface, reason)?;
+                                return Ok(Some(EventOutcome::FrameDropped { interface, reason }));
+                            }
+                        };
+                        if logical_interface != interface {
+                            self.devices
+                                .get_mut(&interface.device)
+                                .ok_or(DropReason::NoLink)?
+                                .record_frame(logical_interface.interface, frame.len(), true)?;
+                        }
                         if self
                             .device(interface.device)?
-                            .is_switchport(interface.interface)
+                            .is_switchport(logical_interface.interface)
                         {
-                            self.handle_switch_frame(interface, &frame)?;
+                            self.handle_switch_frame(logical_interface, &frame)?;
                         } else {
                             if let Some((logical, inner)) = self
                                 .device(interface.device)?
-                                .routed_ingress(interface.interface, &frame)
+                                .routed_ingress(logical_interface.interface, &frame)
                             {
                                 let logical = InterfaceRef {
                                     device: interface.device,
                                     interface: logical,
                                 };
-                                if logical != interface {
+                                if logical != logical_interface {
                                     self.devices
                                         .get_mut(&logical.device)
                                         .ok_or(DropReason::NoLink)?
@@ -498,10 +547,12 @@ impl Lab {
                     && learned.is_none_or(|entry| entry.interface == *port)
                     && device.protocol_up(*port)
                     && device.stp_forwarding(*port, vlan)
-                    && connected.contains_key(&InterfaceRef {
-                        device: ingress.device,
-                        interface: *port,
-                    })
+                    && device.channel_interface(*port).is_none()
+                    && (device.is_port_channel(*port)
+                        || connected.contains_key(&InterfaceRef {
+                            device: ingress.device,
+                            interface: *port,
+                        }))
             })
             .map(|interface| InterfaceRef {
                 device: ingress.device,

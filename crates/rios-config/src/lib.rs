@@ -25,6 +25,10 @@ pub enum AdminState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InterfaceConfig {
     #[serde(default)]
+    pub channel_group: Option<ChannelMembership>,
+    #[serde(default)]
+    pub port_channel: Option<u16>,
+    #[serde(default)]
     pub named_access_group_in: Option<AclId>,
     #[serde(default)]
     pub named_access_group_out: Option<AclId>,
@@ -62,6 +66,19 @@ pub struct Dot1qEncapsulation {
     pub native: bool,
 }
 
+/// Static aggregation or LACP participation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ChannelMode {
+    On,
+    Active,
+    Passive,
+}
+/// Physical member assignment; the logical port owns forwarding policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelMembership {
+    pub number: u16,
+    pub mode: ChannelMode,
+}
 /// NAT side assigned to a router interface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NatRole {
@@ -328,7 +345,9 @@ impl RunningConfig {
             }
             out.push_str("!\n");
         }
-        for config in self.interfaces.values() {
+        let mut interfaces: Vec<_> = self.interfaces.values().collect();
+        interfaces.sort_by_key(|config| config.port_channel.is_some());
+        for config in interfaces {
             writeln!(out, "interface {}", config.name).unwrap();
             if let Some(encapsulation) = config.dot1q {
                 writeln!(
@@ -409,6 +428,19 @@ impl RunningConfig {
                         }
                     }
                 }
+            }
+            if let Some(group) = config.channel_group {
+                writeln!(
+                    out,
+                    " channel-group {} mode {}",
+                    group.number,
+                    match group.mode {
+                        ChannelMode::On => "on",
+                        ChannelMode::Active => "active",
+                        ChannelMode::Passive => "passive",
+                    }
+                )
+                .unwrap();
             }
             writeln!(
                 out,
