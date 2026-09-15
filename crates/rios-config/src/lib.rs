@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 mod acl;
 mod nat;
+mod stp;
 pub use acl::{AccessList, AclEntry, AclId, AclKind, AclProtocol, AddressMatch, PortMatch};
 pub use nat::{NatPool, NatPoolRule, NatTransport, StaticNat};
 use rios_ipv4::{Ipv4InterfaceConfig, Ipv4Network};
@@ -12,6 +13,7 @@ use std::{
     fmt::Write,
     net::Ipv4Addr,
 };
+pub use stp::{StpConfig, StpPortConfig};
 
 pub use rios_ethernet::VlanId;
 
@@ -24,6 +26,8 @@ pub enum AdminState {
 /// Authoritative configuration for one interface.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InterfaceConfig {
+    #[serde(default)]
+    pub spanning_tree: StpPortConfig,
     #[serde(default)]
     pub channel_group: Option<ChannelMembership>,
     #[serde(default)]
@@ -228,6 +232,8 @@ fn default_lease_seconds() -> u32 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunningConfig {
     #[serde(default)]
+    pub spanning_tree: StpConfig,
+    #[serde(default)]
     pub dhcp_excluded: BTreeMap<Ipv4Addr, Ipv4Addr>,
     #[serde(default)]
     pub static_nat: BTreeSet<StaticNat>,
@@ -264,6 +270,12 @@ impl RunningConfig {
         let mut out = format!("hostname {}\n!\n", self.hostname);
         if self.ip_routing {
             out.push_str("ip routing\n!\n");
+        }
+        if self.spanning_tree.rapid {
+            out.push_str("spanning-tree mode rapid-pvst\n");
+        }
+        for (vlan, priority) in &self.spanning_tree.priorities {
+            writeln!(out, "spanning-tree vlan {} priority {priority}", vlan.get()).unwrap();
         }
         for (id, vlan) in &self.vlans {
             if *id == VlanId::DEFAULT && vlan.name.is_empty() {
@@ -366,6 +378,22 @@ impl RunningConfig {
             }
             if let Some(helper) = config.helper_address {
                 writeln!(out, " ip helper-address {helper}").unwrap();
+            }
+            let stp = &config.spanning_tree;
+            if stp.priority != 128 {
+                writeln!(out, " spanning-tree port-priority {}", stp.priority).unwrap();
+            }
+            if let Some(cost) = stp.cost {
+                writeln!(out, " spanning-tree cost {cost}").unwrap();
+            }
+            if stp.portfast {
+                out.push_str(" spanning-tree portfast\n");
+            }
+            if stp.bpdu_guard {
+                out.push_str(" spanning-tree bpduguard enable\n");
+            }
+            if stp.root_guard {
+                out.push_str(" spanning-tree guard root\n");
             }
             if config.dhcp_client {
                 out.push_str(" ip address dhcp\n");

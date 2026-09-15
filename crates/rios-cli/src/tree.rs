@@ -55,6 +55,18 @@ pub(crate) enum Action {
     OspfInterface,
     OspfDatabase,
     SpanningTree,
+    SpanningTreeVlan,
+    StpRapid,
+    StpClassic,
+    StpPriority,
+    StpPortPriority,
+    StpCost,
+    StpPortfast,
+    NoStpPortfast,
+    StpBpduGuard,
+    NoStpBpduGuard,
+    StpRootGuard,
+    NoStpRootGuard,
     ShowAccessLists,
     ShowDhcpBinding,
     ShowNatTranslations,
@@ -89,6 +101,9 @@ impl Action {
         match self {
             Self::Hostname | Self::NamedStandardAcl | Self::NamedExtendedAcl => &["<name>"],
             Self::NoAclSequence => &["<sequence>"],
+            Self::StpPriority | Self::SpanningTreeVlan => &["<vlan-id>"],
+            Self::StpPortPriority => &["<0-240>"],
+            Self::StpCost => &["<1-200000000>"],
             Self::ChannelGroup => &["<1-4096> mode on|active|passive"],
             Self::Interface | Self::Interfaces => &[
                 "range",
@@ -221,6 +236,14 @@ pub(crate) fn tree(mode: CliMode) -> Node {
             root.add(
                 &[("show", ""), ("spanning-tree", "Spanning-tree state")],
                 SpanningTree,
+            );
+            root.add(
+                &[
+                    ("show", ""),
+                    ("spanning-tree", ""),
+                    ("vlan", "VLAN spanning tree"),
+                ],
+                SpanningTreeVlan,
             );
             root.add(
                 &[("show", ""), ("access-lists", "IPv4 access lists")],
@@ -378,6 +401,26 @@ pub(crate) fn tree(mode: CliMode) -> Node {
                     ],
                     NamedExtendedAcl,
                 );
+                root.add(
+                    &[
+                        ("spanning-tree", "Bridge loop prevention"),
+                        ("mode", "Protocol selection"),
+                        ("rapid-pvst", "Rapid per-VLAN spanning tree"),
+                    ],
+                    StpRapid,
+                );
+                root.add(
+                    &[
+                        ("spanning-tree", ""),
+                        ("mode", ""),
+                        ("pvst", "Classic per-VLAN spanning tree"),
+                    ],
+                    StpClassic,
+                );
+                root.add(
+                    &[("spanning-tree", ""), ("vlan", "VLAN bridge priority")],
+                    StpPriority,
+                );
                 root.add(&[("hostname", "Set device hostname")], Hostname);
                 root.add(
                     &[("ip", "IP configuration"), ("routing", "Enable IP routing")],
@@ -487,6 +530,61 @@ pub(crate) fn tree(mode: CliMode) -> Node {
                 mode,
                 CliMode::InterfaceConfiguration(_) | CliMode::InterfaceRangeConfiguration(_, _)
             ) {
+                for (word, help, action) in [
+                    (
+                        "port-priority",
+                        "Priority in multiples of 16",
+                        StpPortPriority,
+                    ),
+                    ("cost", "Root path cost", StpCost),
+                    ("portfast", "Edge port", StpPortfast),
+                ] {
+                    root.add(
+                        &[("spanning-tree", "Port spanning tree"), (word, help)],
+                        action,
+                    );
+                }
+                root.add(
+                    &[
+                        ("no", ""),
+                        ("spanning-tree", ""),
+                        ("portfast", "Disable edge behavior"),
+                    ],
+                    NoStpPortfast,
+                );
+                root.add(
+                    &[
+                        ("spanning-tree", ""),
+                        ("bpduguard", "Disable port on BPDU"),
+                        ("enable", "Enable BPDU Guard"),
+                    ],
+                    StpBpduGuard,
+                );
+                root.add(
+                    &[
+                        ("spanning-tree", ""),
+                        ("bpduguard", ""),
+                        ("disable", "Disable BPDU Guard"),
+                    ],
+                    NoStpBpduGuard,
+                );
+                root.add(
+                    &[
+                        ("spanning-tree", ""),
+                        ("guard", "Guard policy"),
+                        ("root", "Reject superior roots"),
+                    ],
+                    StpRootGuard,
+                );
+                root.add(
+                    &[
+                        ("no", ""),
+                        ("spanning-tree", ""),
+                        ("guard", ""),
+                        ("root", "Remove Root Guard"),
+                    ],
+                    NoStpRootGuard,
+                );
                 root.add(&[("channel-group", "Bundle membership")], ChannelGroup);
                 root.add(
                     &[("no", ""), ("channel-group", "Remove bundle membership")],

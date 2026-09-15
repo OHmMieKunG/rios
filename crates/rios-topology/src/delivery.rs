@@ -2,7 +2,7 @@ use crate::*;
 use rios_ethernet::MacAddress;
 use rios_ipv4::{IpProtocol, Ipv4Packet};
 use rios_routing::{HELLO_INTERVAL_MS, OSPF_ALL_ROUTERS};
-use rios_switching::{ConfigurationBpdu, STP_ETHERTYPE, STP_HELLO_MS, STP_MULTICAST};
+use rios_switching::{STP_HELLO_MS, STP_MULTICAST, StpBpdu};
 impl Lab {
     /// Move a frame into a virtual cable. Delivery occurs only when events are stepped.
     pub fn transmit(&mut self, source: InterfaceRef, frame: EthernetFrame) -> Result<(), LabError> {
@@ -454,24 +454,7 @@ impl Lab {
         if self.stp_generations.get(&device) != Some(&generation) {
             return Ok(());
         }
-        let now = self.now();
-        let bpdus = self.devices.get_mut(&device).unwrap().stp_bpdus(now);
-        for (interface, vlan, bpdu) in bpdus {
-            let source = InterfaceRef { device, interface };
-            let source_mac = self.device(device)?.interfaces()[&interface].mac_address;
-            let frame = EthernetFrame {
-                destination: MacAddress(STP_MULTICAST),
-                source: source_mac,
-                ethertype: EtherType::Other(STP_ETHERTYPE),
-                payload: bpdu.encode().to_vec(),
-            };
-            if let Some(frame) = self
-                .device(device)?
-                .prepare_switch_egress(interface, vlan, frame)
-            {
-                self.transmit_protocol(source, frame)?;
-            }
-        }
+        self.emit_stp_bpdus(device)?;
         let next = self
             .now()
             .0
@@ -481,6 +464,32 @@ impl Lab {
             SimTime(next),
             SimulationEvent::StpHello { device, generation },
         )?;
+        Ok(())
+    }
+
+    fn emit_stp_bpdus(&mut self, device: rios_simulator::DeviceId) -> Result<(), LabError> {
+        let now = self.now();
+        let packets = self
+            .devices
+            .get_mut(&device)
+            .ok_or(DropReason::NoLink)?
+            .stp_packets(now);
+        for (interface, vlan, packet) in packets {
+            let source = InterfaceRef { device, interface };
+            let payload = packet.encode();
+            let frame = EthernetFrame {
+                destination: MacAddress(STP_MULTICAST),
+                source: self.device(device)?.interfaces()[&interface].mac_address,
+                ethertype: EtherType::Length(payload.len() as u16),
+                payload,
+            };
+            if let Some(frame) = self
+                .device(device)?
+                .prepare_switch_egress(interface, vlan, frame)
+            {
+                self.transmit_protocol(source, frame)?;
+            }
+        }
         Ok(())
     }
 
@@ -495,18 +504,32 @@ impl Lab {
         else {
             return Ok(());
         };
-        if frame.destination == MacAddress(STP_MULTICAST)
-            && frame.ethertype == EtherType::Other(STP_ETHERTYPE)
-        {
-            if let Ok(bpdu) = ConfigurationBpdu::decode(&frame.payload) {
+        if frame.destination == MacAddress(STP_MULTICAST) {
+            if let Ok(bpdu) = StpBpdu::decode(&frame.payload) {
                 let now = self.now();
-                self.devices.get_mut(&ingress.device).unwrap().receive_stp(
-                    ingress.interface,
-                    vlan,
-                    bpdu,
-                    now,
-                );
+                let changed = self
+                    .devices
+                    .get_mut(&ingress.device)
+                    .ok_or(DropReason::NoLink)?
+                    .receive_stp_packet(ingress.interface, vlan, bpdu, now);
+                if changed {
+                    self.emit_stp_bpdus(ingress.device)?;
+                }
             }
+            return Ok(());
+        }
+        let now = self.now();
+        let device = self
+            .devices
+            .get_mut(&ingress.device)
+            .ok_or(DropReason::NoLink)?;
+        device.refresh_spanning_tree(now);
+        if !device.stp_forwarding(ingress.interface, vlan) {
+            if device.stp_learning(ingress.interface, vlan) {
+                device.learn_mac(vlan, frame.source, ingress.interface, now)?;
+            }
+            device.record_drop_reason(ingress.interface, DropReason::StpBlocking)?;
+            self.trace_frame(ingress, TraceAction::Drop(DropReason::StpBlocking), &frame);
             return Ok(());
         }
         if let Some(svi) = self.device(ingress.device)?.active_svi(vlan) {
@@ -602,6 +625,5 @@ fn is_stp_frame(frame: &EthernetFrame) -> bool {
     } else {
         frame.clone()
     };
-    frame.destination == MacAddress(STP_MULTICAST)
-        && frame.ethertype == EtherType::Other(STP_ETHERTYPE)
+    frame.destination == MacAddress(STP_MULTICAST) && StpBpdu::decode(&frame.payload).is_ok()
 }

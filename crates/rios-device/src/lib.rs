@@ -27,7 +27,7 @@ use rios_ethernet::{EthernetFrame, MacAddress};
 use rios_ipv4::Ipv4InterfaceConfig;
 use rios_routing::{OspfNeighbor, RouterLsa};
 use rios_simulator::{DeviceId, InterfaceId, LinkState};
-use rios_switching::{ConfigurationBpdu, StpPortRole, StpPortState};
+use rios_switching::{StpPortRole, StpPortState};
 use std::collections::{BTreeMap, BTreeSet};
 pub use tcp::{TcpConnection, TcpError, TcpSocket, TcpState};
 
@@ -120,6 +120,7 @@ pub struct Interface {
 /// A virtual device with privately owned runtime and configuration state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Device {
+    stp_errdisabled: BTreeSet<InterfaceId>,
     lacp_neighbors: BTreeMap<InterfaceId, LacpNeighbor>,
     tcp: tcp::TcpRuntime,
     acl_matches: BTreeMap<(rios_config::AclId, u32), u64>,
@@ -155,12 +156,15 @@ struct OspfRuntime {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StpReceived {
-    bpdu: ConfigurationBpdu,
+    bpdu: rios_switching::StpBpdu,
+    guarded: bool,
     expires_at: rios_simulator::SimTime,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct StpInstance {
+    agreed: BTreeSet<InterfaceId>,
+    transitions: BTreeMap<InterfaceId, rios_simulator::SimTime>,
     root_id: u64,
     root_cost: u32,
     root_port: Option<InterfaceId>,
@@ -170,6 +174,8 @@ struct StpInstance {
 /// Rejected state changes leave the device unchanged.
 #[derive(Debug, thiserror::Error)]
 pub enum DeviceError {
+    #[error("invalid spanning-tree priority, cost, or port policy")]
+    InvalidSpanningTree,
     #[error("invalid EtherChannel member or incompatible port configuration")]
     InvalidChannel,
     #[error("invalid access-list name, kind, sequence, or rule")]
@@ -267,6 +273,7 @@ impl Device {
             vlans.insert(VlanId::DEFAULT, VlanConfig::default());
         }
         Ok(Self {
+            stp_errdisabled: BTreeSet::new(),
             lacp_neighbors: BTreeMap::new(),
             tcp: tcp::TcpRuntime::default(),
             acl_matches: BTreeMap::new(),
@@ -277,6 +284,7 @@ impl Device {
             device_type,
             interfaces: BTreeMap::new(),
             running_config: RunningConfig {
+                spanning_tree: rios_config::StpConfig::default(),
                 dhcp_excluded: BTreeMap::new(),
                 static_nat: BTreeSet::new(),
                 nat_pools: BTreeMap::new(),
@@ -417,6 +425,7 @@ impl Device {
         self.running_config.interfaces.insert(
             id,
             InterfaceConfig {
+                spanning_tree: rios_config::StpPortConfig::default(),
                 channel_group: None,
                 port_channel: None,
                 helper_address: None,
@@ -573,6 +582,14 @@ impl Device {
         state: AdminState,
     ) -> Result<(), DeviceError> {
         self.config_mut(id)?.admin_state = state;
+        if state == AdminState::Down {
+            self.stp_errdisabled.remove(&id);
+            self.lacp_neighbors.remove(&id);
+            for instance in self.stp_runtime.values_mut() {
+                instance.received.remove(&id);
+                instance.ports.remove(&id);
+            }
+        }
         Ok(())
     }
     /// Create a VLAN database entry on a switch.
@@ -817,6 +834,11 @@ impl Device {
             .link_state = state;
         if state == LinkState::Down {
             self.lacp_neighbors.remove(&id);
+            for instance in self.stp_runtime.values_mut() {
+                instance.received.remove(&id);
+                instance.agreed.remove(&id);
+                instance.transitions.remove(&id);
+            }
             self.mac_table.retain(|_, entry| entry.interface != id);
         }
         Ok(())
@@ -826,7 +848,8 @@ impl Device {
         let Some(interface) = self.interfaces.get(&id) else {
             return false;
         };
-        self.running_config.interfaces[&id].admin_state == AdminState::Up
+        !self.stp_errdisabled.contains(&id)
+            && self.running_config.interfaces[&id].admin_state == AdminState::Up
             && match interface.kind {
                 InterfaceKind::Loopback => true,
                 InterfaceKind::PortChannel => !self.channel_members(id).is_empty(),

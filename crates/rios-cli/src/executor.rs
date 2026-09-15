@@ -61,6 +61,7 @@ fn executable_after_do(command: &Command) -> bool {
             | Command::ShowIpOspfInterface
             | Command::ShowIpOspfDatabase
             | Command::ShowSpanningTree
+            | Command::ShowSpanningTreeVlan(_)
             | Command::ShowAccessLists
             | Command::ShowIpDhcpBinding
             | Command::ShowIpNatTranslations
@@ -119,10 +120,13 @@ pub fn execute_at(
         Command::AddAclEntry { .. } | Command::RemoveAclEntry(_) => {
             matches!(mode, AccessListConfiguration(_, _))
         }
-        Command::SetChannelGroup { .. } | Command::ClearChannelGroup => matches!(
-            mode,
-            InterfaceConfiguration(_) | InterfaceRangeConfiguration(_, _)
-        ),
+        Command::SetStpRapid(_) | Command::SetStpPriority { .. } => mode == GlobalConfiguration,
+        Command::SetStpPort(_) | Command::SetChannelGroup { .. } | Command::ClearChannelGroup => {
+            matches!(
+                mode,
+                InterfaceConfiguration(_) | InterfaceRangeConfiguration(_, _)
+            )
+        }
         Command::SetNamedAccessGroup { .. } => matches!(
             mode,
             InterfaceConfiguration(_) | SubinterfaceConfiguration(_)
@@ -195,6 +199,7 @@ pub fn execute_at(
         | Command::ShowIpOspfInterface
         | Command::ShowIpOspfDatabase
         | Command::ShowSpanningTree
+        | Command::ShowSpanningTreeVlan(_)
         | Command::ShowAccessLists
         | Command::ShowIpDhcpBinding
         | Command::ShowIpNatTranslations
@@ -452,6 +457,25 @@ pub fn execute_at(
         Command::ShowIpOspfInterface => result.output = device.show_ip_ospf_interface(),
         Command::ShowIpOspfDatabase => result.output = device.show_ip_ospf_database(),
         Command::ShowSpanningTree => result.output = device.show_spanning_tree(None, now),
+        Command::ShowSpanningTreeVlan(vlan) => {
+            result.output = device.show_spanning_tree(Some(vlan), now)
+        }
+        Command::SetStpRapid(rapid) => device.set_stp_rapid(rapid)?,
+        Command::SetStpPriority { vlan, priority } => device.set_stp_priority(vlan, priority)?,
+        Command::SetStpPort(option) => edit_interfaces(device, mode, |device, id| {
+            let mut policy = device.running_config().interfaces[&id]
+                .spanning_tree
+                .clone();
+            match option {
+                StpPortOption::Priority(value) => policy.priority = value,
+                StpPortOption::Cost(value) => policy.cost = Some(value),
+                StpPortOption::Portfast(value) => policy.portfast = value,
+                StpPortOption::BpduGuard(value) => policy.bpdu_guard = value,
+                StpPortOption::RootGuard(value) => policy.root_guard = value,
+            }
+            device.set_stp_port(id, policy)
+        })?,
+
         Command::ShowAccessLists => result.output = device.show_access_lists(),
         Command::ShowIpDhcpBinding => result.output = device.show_ip_dhcp_binding(now),
         Command::ShowIpNatTranslations => result.output = device.show_ip_nat_translations(now),

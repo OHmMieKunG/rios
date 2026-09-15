@@ -17,7 +17,9 @@ impl Device {
             } else {
                 "unset"
             };
-            let status = if config.admin_state == AdminState::Down {
+            let status = if self.stp_errdisabled.contains(id) {
+                "err-disabled"
+            } else if config.admin_state == AdminState::Down {
                 "administratively down"
             } else {
                 "up"
@@ -50,7 +52,9 @@ impl Device {
                 continue;
             }
             let config = &self.running_config.interfaces[id];
-            let status = if config.admin_state == AdminState::Down {
+            let status = if self.stp_errdisabled.contains(id) {
+                "err-disabled"
+            } else if config.admin_state == AdminState::Down {
                 "administratively down"
             } else {
                 "up"
@@ -114,7 +118,9 @@ impl Device {
                 continue;
             }
             let config = &self.running_config.interfaces[id];
-            let status = if config.admin_state == AdminState::Down {
+            let status = if self.stp_errdisabled.contains(id) {
+                "err-disabled"
+            } else if config.admin_state == AdminState::Down {
                 "disabled"
             } else if self.protocol_up(*id) {
                 "connected"

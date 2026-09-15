@@ -220,6 +220,7 @@ impl Lab {
         let id = device.id();
         self.names.insert(name.into(), id);
         self.devices.insert(id, device);
+        self.schedule_lacp(id)?;
         self.schedule_stp_now(id)?;
         self.schedule_dhcp_now(id)?;
         Ok(())

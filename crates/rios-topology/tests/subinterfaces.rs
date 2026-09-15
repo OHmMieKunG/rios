@@ -43,6 +43,17 @@ fn setup() -> Lab {
     }
     let sw = lab.device_id("SW1").unwrap();
     lab.with_device_mut(sw, |device| {
+        for id in device.interfaces().keys().copied().collect::<Vec<_>>() {
+            device
+                .set_stp_port(
+                    id,
+                    rios_config::StpPortConfig {
+                        portfast: true,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+        }
         device.create_vlan(vlan(10)).unwrap();
         device.create_vlan(vlan(20)).unwrap();
         for (name, vid) in [("gi0/1", 10), ("gi0/2", 20), ("gi0/4", 10)] {

@@ -223,6 +223,17 @@ fn conflicting_offer_is_declined_and_next_address_is_allocated() {
     ] {
         let port = lab.endpoint(name).unwrap();
         lab.with_device_mut(port.device, |device| {
+            if device.is_switchport(port.interface) {
+                device
+                    .set_stp_port(
+                        port.interface,
+                        rios_config::StpPortConfig {
+                            portfast: true,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+            }
             device
                 .set_admin_state(port.interface, AdminState::Up)
                 .unwrap()

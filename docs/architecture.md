@@ -373,3 +373,33 @@ active/passive negotiation, passive/passive inactivity, peer timeout, routed
 failover, VLAN trunk forwarding, one-copy broadcast flooding, and logical MAC
 learning. Marker protocol, configurable slow timers, minimum-links, resilient
 hashing, and multi-chassis aggregation are not implemented.
+
+### Spanning-tree hardening
+
+Classic STP now uses 15-second listening and learning intervals before forwarding.
+This deliberately replaces immediate startup forwarding. Configure
+`spanning-tree portfast` on host/router-facing edge ports when immediate
+forwarding is wanted; receiving a BPDU removes operational edge status.
+Existing topology files still load. Tests for unrelated packet forwarding now
+explicitly select PortFast or wait for convergence.
+
+`spanning-tree mode rapid-pvst` enables per-VLAN RSTP with proposal/agreement
+BPDUs. A proposed root transition synchronizes other nonedge designated ports
+before sending agreement. Alternate ports discard user traffic. Legacy neighbors
+use classic BPDU transmission and timed fallback. Bridge priority, port priority,
+and explicit path cost affect selection. Root Guard holds a superior downstream
+port root-inconsistent; BPDU Guard error-disables the port until a shutdown/no
+shutdown cycle. These follow public
+[Cisco RSTP behavior descriptions](https://www.cisco.com/c/en/us/support/docs/lan-switching/spanning-tree-protocol/24062-146.html).
+
+BPDUs now use IEEE 802.3 length fields and LLC instead of the old private
+EtherType, so captures expose recognizable STP/RSTP packets. VLAN instances use
+802.1Q encapsulation; proprietary PVST SNAP encapsulation and MST regions are
+not modeled. User ingress is checked before SVI delivery, closing the previous
+blocked-port bypass. MAC entries flush on local topology/state changes. Full
+TCN/TC propagation is not yet modeled. Protocol state advances with simulated
+time and periodic events; no sleeping threads are involved.
+
+Unit tests cover BPDU/LLC codecs, timed transitions, synchronization, priorities,
+costs, and guard recovery. Topology tests verify independent VLAN roots, rapid
+triangle failover, single-copy flooding, and blocked ingress isolation from SVIs.

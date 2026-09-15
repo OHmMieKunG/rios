@@ -149,7 +149,7 @@ impl Device {
         if payload_len > usize::from(self.running_config.interfaces[&id].mtu) {
             return Err(DropReason::MtuExceeded);
         }
-        if u16::from(frame.ethertype) < 0x0600 {
+        if !frame.valid_length_or_type() {
             return Err(DropReason::InvalidEtherType);
         }
         if receive

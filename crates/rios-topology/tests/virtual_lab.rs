@@ -10,6 +10,15 @@ use rios_topology::*;
 const YAML: &str = include_str!("../../../examples/two-routers.yaml");
 fn enable(lab: &mut Lab, endpoint: InterfaceRef, state: AdminState) {
     lab.with_device_mut(endpoint.device, |device| {
+        if device.is_switchport(endpoint.interface) {
+            device.set_stp_port(
+                endpoint.interface,
+                rios_config::StpPortConfig {
+                    portfast: true,
+                    ..Default::default()
+                },
+            )?;
+        }
         device.set_admin_state(endpoint.interface, state)
     })
     .unwrap()
@@ -333,6 +342,7 @@ fn vlans_isolate_access_ports_and_trunks_carry_tags() {
         (sw2, sw2_access10, sw2_access20, sw2_trunk, [vlan10, vlan10]),
     ] {
         lab.with_device_mut(device, |switch| {
+            switch.set_stp_rapid(true).unwrap();
             switch.create_vlan(vlan10).unwrap();
             switch.create_vlan(vlan20).unwrap();
             switch.set_access_vlan(access10.interface, vlan10).unwrap();
@@ -361,10 +371,11 @@ fn vlans_isolate_access_ports_and_trunks_carry_tags() {
         enable(&mut lab, endpoint, AdminState::Up);
     }
 
+    lab.run_until(SimTime::from_millis(100)).unwrap();
     let mut vlan10_broadcast = frame(&lab, h10a, h10b);
     vlan10_broadcast.destination = MacAddress::BROADCAST;
     lab.transmit(h10a, vlan10_broadcast).unwrap();
-    let outcomes = lab.run_until(SimTime::from_millis(3)).unwrap();
+    let outcomes = lab.run_until(SimTime::from_millis(103)).unwrap();
     assert!(outcomes.iter().any(|event| matches!(event,
         EventOutcome::FrameReceived { interface, frame }
             if *interface == sw2_trunk
@@ -382,7 +393,7 @@ fn vlans_isolate_access_ports_and_trunks_carry_tags() {
     let mut vlan20_broadcast = frame(&lab, h20a, h20b);
     vlan20_broadcast.destination = MacAddress::BROADCAST;
     lab.transmit(h20a, vlan20_broadcast).unwrap();
-    let outcomes = lab.run_until(SimTime::from_millis(6)).unwrap();
+    let outcomes = lab.run_until(SimTime::from_millis(106)).unwrap();
     assert!(outcomes.iter().any(|event| matches!(event,
         EventOutcome::FrameReceived { interface, frame }
             if *interface == sw2_trunk && frame.ethertype == EtherType::Dot1Q
@@ -560,7 +571,7 @@ fn spanning_tree_blocks_a_vlan_loop_and_prevents_duplicate_delivery() {
     for endpoint in endpoints {
         enable(&mut lab, endpoint, AdminState::Up);
     }
-    lab.run_until(SimTime::from_millis(6_000)).unwrap();
+    lab.run_until(SimTime::from_millis(35_000)).unwrap();
 
     let now = lab.now();
     let states = ["SW1", "SW2", "SW3"]
@@ -577,7 +588,7 @@ fn spanning_tree_blocks_a_vlan_loop_and_prevents_duplicate_delivery() {
     let mut broadcast = frame(&lab, h1, h2);
     broadcast.destination = MacAddress::BROADCAST;
     lab.transmit(h1, broadcast).unwrap();
-    let outcomes = lab.run_until(SimTime::from_millis(6_010)).unwrap();
+    let outcomes = lab.run_until(SimTime::from_millis(35_010)).unwrap();
     assert_eq!(
         outcomes
             .iter()
@@ -588,11 +599,11 @@ fn spanning_tree_blocks_a_vlan_loop_and_prevents_duplicate_delivery() {
     assert!(outcomes.len() < 10);
 
     lab.set_link_state(LinkId(3), LinkState::Down).unwrap();
-    lab.run_until(SimTime::from_millis(32_000)).unwrap();
+    lab.run_until(SimTime::from_millis(95_000)).unwrap();
     let mut broadcast = frame(&lab, h1, h2);
     broadcast.destination = MacAddress::BROADCAST;
     lab.transmit(h1, broadcast).unwrap();
-    let reconverged = lab.run_until(SimTime::from_millis(32_010)).unwrap();
+    let reconverged = lab.run_until(SimTime::from_millis(95_010)).unwrap();
     let reconverged_count =
         reconverged
             .iter()
@@ -845,6 +856,17 @@ fn layer3_switch_svis_route_between_access_vlans() {
         device
             .set_switchport_mode(core20.interface, SwitchportMode::Access)
             .unwrap();
+        for port in [core10.interface, core20.interface] {
+            device
+                .set_stp_port(
+                    port,
+                    rios_config::StpPortConfig {
+                        portfast: true,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+        }
         device.set_access_vlan(core10.interface, vlan10).unwrap();
         device.set_access_vlan(core20.interface, vlan20).unwrap();
         device

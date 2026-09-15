@@ -87,6 +87,15 @@ pub enum NetworkFeature {
     DebugArp,
     DebugIcmp,
 }
+/// A validated switch-port spanning-tree setting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StpPortOption {
+    Priority(u8),
+    Cost(u32),
+    Portfast(bool),
+    BpduGuard(bool),
+    RootGuard(bool),
+}
 /// One DHCP pool option, applied through shared device validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DhcpPoolOption {
@@ -210,6 +219,13 @@ pub enum Command {
     ShowIpOspfInterface,
     ShowIpOspfDatabase,
     ShowSpanningTree,
+    ShowSpanningTreeVlan(VlanId),
+    SetStpRapid(bool),
+    SetStpPriority {
+        vlan: VlanId,
+        priority: u16,
+    },
+    SetStpPort(StpPortOption),
     ShowAccessLists,
     ShowIpDhcpBinding,
     ShowIpNatTranslations,

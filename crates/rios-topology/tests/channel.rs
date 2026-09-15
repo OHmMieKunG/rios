@@ -17,6 +17,9 @@ links:
     for name in ["A", "B"] {
         let device = lab.device_id(name).unwrap();
         lab.with_device_mut(device, |device| {
+            if device.supports_switching() {
+                device.set_stp_rapid(true).unwrap();
+            }
             for port in ["gi0/0", "gi0/1"] {
                 let id = device.ensure_interface(port).unwrap();
                 device.set_admin_state(id, AdminState::Up).unwrap();
@@ -223,6 +226,17 @@ links:
     .unwrap();
     for name in ["SW1", "SW2"] {
         lab.with_device_mut(lab.device_id(name).unwrap(), |device| {
+            device.set_stp_rapid(true).unwrap();
+            let host = device.ensure_interface("gi0/2").unwrap();
+            device
+                .set_stp_port(
+                    host,
+                    rios_config::StpPortConfig {
+                        portfast: true,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
             for name in ["gi0/0", "gi0/1"] {
                 let id = device.ensure_interface(name).unwrap();
                 device

@@ -917,3 +917,37 @@ fn port_channel_modes_ranges_help_and_config_replay() {
             .any(|s| s.word == "Port-channel")
     );
 }
+
+#[test]
+fn spanning_tree_policy_configures_and_replays() {
+    let mut switch = Device::new(DeviceId(1), "SW", DeviceType::Switch).unwrap();
+    switch.add_physical_interface("gi0/1").unwrap();
+    let mut session = CliSession {
+        mode: CliMode::GlobalConfiguration,
+    };
+    for command in [
+        "spanning-tree mode rapid-pvst",
+        "spanning-tree vlan 10 priority 24576",
+        "int gi0/1",
+        "spanning-tree port-priority 64",
+        "spanning-tree cost 10",
+        "spanning-tree portfast",
+        "spanning-tree bpduguard enable",
+        "spanning-tree guard root",
+        "end",
+    ] {
+        run(&mut switch, &mut session, command).unwrap();
+    }
+    let rendered = switch.running_config().render();
+    let mut restored = Device::new(DeviceId(1), "SW", DeviceType::Switch).unwrap();
+    restored.add_physical_interface("gi0/1").unwrap();
+    load_configuration(&mut restored, &rendered).unwrap();
+    assert_eq!(restored.running_config(), switch.running_config());
+    assert!(parse("sh spanning-tree vl 10", session.mode).is_ok());
+    assert!(
+        suggestions("spanning-tree vlan 10 ", CliMode::GlobalConfiguration, &[])
+            .unwrap()
+            .iter()
+            .any(|item| item.word == "priority")
+    );
+}

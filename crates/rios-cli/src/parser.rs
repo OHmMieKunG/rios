@@ -174,6 +174,8 @@ fn parse_input(
         Action::DhcpLease | Action::DhcpDns | Action::DhcpExcluded => usize::MAX,
         Action::DhcpHost => 2,
         Action::DhcpDomain | Action::DhcpHardware | Action::DhcpHelper => 1,
+        Action::StpPriority => 3,
+        Action::SpanningTreeVlan | Action::StpPortPriority | Action::StpCost => 1,
         Action::ChannelGroup => 3,
         Action::NatPool => 5,
         Action::AccessGroup => 2,
@@ -294,6 +296,7 @@ fn parse_input(
                     | Command::ShowIpOspfInterface
                     | Command::ShowIpOspfDatabase
                     | Command::ShowSpanningTree
+                    | Command::ShowSpanningTreeVlan(_)
                     | Command::ShowAccessLists
                     | Command::ShowIpDhcpBinding
                     | Command::ShowIpNatTranslations
@@ -521,6 +524,44 @@ fn parse_input(
         OspfInterface => Command::ShowIpOspfInterface,
         OspfDatabase => Command::ShowIpOspfDatabase,
         SpanningTree => Command::ShowSpanningTree,
+        SpanningTreeVlan => {
+            Command::ShowSpanningTreeVlan(parse_vlan(args[0].text, args[0].offset)?)
+        }
+        StpRapid => Command::SetStpRapid(true),
+        StpClassic => Command::SetStpRapid(false),
+        StpPriority => {
+            let vlan = parse_vlan(args[0].text, args[0].offset)?;
+            unique_choice(&args[1], &["priority"])?;
+            let priority = args[2]
+                .text
+                .parse::<u16>()
+                .ok()
+                .filter(|priority| priority.is_multiple_of(4096))
+                .ok_or_else(|| invalid(args[2].offset, "priority must be a multiple of 4096"))?;
+            Command::SetStpPriority { vlan, priority }
+        }
+        StpPortPriority => Command::SetStpPort(StpPortOption::Priority(
+            args[0]
+                .text
+                .parse::<u8>()
+                .ok()
+                .filter(|priority| priority.is_multiple_of(16))
+                .ok_or_else(|| invalid(args[0].offset, "priority must be a multiple of 16"))?,
+        )),
+        StpCost => Command::SetStpPort(StpPortOption::Cost(
+            args[0]
+                .text
+                .parse::<u32>()
+                .ok()
+                .filter(|cost| (1..=200_000_000).contains(cost))
+                .ok_or_else(|| invalid(args[0].offset, "cost out of range"))?,
+        )),
+        StpPortfast => Command::SetStpPort(StpPortOption::Portfast(true)),
+        NoStpPortfast => Command::SetStpPort(StpPortOption::Portfast(false)),
+        StpBpduGuard => Command::SetStpPort(StpPortOption::BpduGuard(true)),
+        NoStpBpduGuard => Command::SetStpPort(StpPortOption::BpduGuard(false)),
+        StpRootGuard => Command::SetStpPort(StpPortOption::RootGuard(true)),
+        NoStpRootGuard => Command::SetStpPort(StpPortOption::RootGuard(false)),
         ShowAccessLists => Command::ShowAccessLists,
         ShowDhcpBinding => Command::ShowIpDhcpBinding,
         ShowNatTranslations => Command::ShowIpNatTranslations,
@@ -888,6 +929,14 @@ pub fn suggestions(
                 | Action::DhcpExcluded
                 | Action::DhcpHelper => {
                     return dhcp::suggest(action, args, partial, start);
+                }
+                Action::StpPriority if args.is_empty() => "<vlan-id>",
+                Action::StpPriority if args.len() == 1 => "priority",
+                Action::StpPriority if args.len() == 2 => "<0-61440>",
+                Action::SpanningTreeVlan | Action::StpCost | Action::StpPortPriority
+                    if args.is_empty() =>
+                {
+                    action.argument_help()[0]
                 }
                 Action::ChannelGroup if args.is_empty() => "<1-4096>",
                 Action::ChannelGroup if args.len() == 1 => "mode",
