@@ -90,11 +90,12 @@ impl Lab {
                 .encode()
                 .map_err(|error| LabError::Protocol(error.to_string()))?,
         };
-        if !self.device(source.device)?.permits_ipv4(
-            source.interface,
-            AccessListDirection::Out,
-            &packet,
-        ) {
+        if !self
+            .devices
+            .get_mut(&source.device)
+            .ok_or_else(|| LabError::UnknownDevice(source.device.0.to_string()))?
+            .permits_ipv4(source.interface, AccessListDirection::Out, &packet)
+        {
             self.devices
                 .get_mut(&source.device)
                 .unwrap()

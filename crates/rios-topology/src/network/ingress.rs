@@ -22,11 +22,12 @@ impl Lab {
         let Ok(mut packet) = Ipv4Packet::decode(&frame.payload) else {
             return Ok(());
         };
-        if !self.device(interface.device)?.permits_ipv4(
-            interface.interface,
-            AccessListDirection::In,
-            &packet,
-        ) {
+        if !self
+            .devices
+            .get_mut(&interface.device)
+            .ok_or_else(|| LabError::UnknownDevice(interface.device.0.to_string()))?
+            .permits_ipv4(interface.interface, AccessListDirection::In, &packet)
+        {
             self.devices
                 .get_mut(&interface.device)
                 .unwrap()

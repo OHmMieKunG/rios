@@ -1,5 +1,7 @@
 //! Structured configuration and deterministic IOS-style rendering.
 #![forbid(unsafe_code)]
+mod acl;
+pub use acl::{AccessList, AclEntry, AclId, AclKind, AclProtocol, AddressMatch, PortMatch};
 use rios_ipv4::{Ipv4InterfaceConfig, Ipv4Network};
 use rios_simulator::InterfaceId;
 use serde::{Deserialize, Serialize};
@@ -20,6 +22,10 @@ pub enum AdminState {
 /// Authoritative configuration for one interface.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InterfaceConfig {
+    #[serde(default)]
+    pub named_access_group_in: Option<AclId>,
+    #[serde(default)]
+    pub named_access_group_out: Option<AclId>,
     /// Physical Ethernet parent of a routed subinterface.
     #[serde(default)]
     pub parent: Option<InterfaceId>,
@@ -187,6 +193,8 @@ pub struct DhcpPoolConfig {
 /// Current structured configuration; runtime counters and carrier are separate.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunningConfig {
+    #[serde(default)]
+    pub named_access_lists: BTreeMap<AclId, AccessList>,
     pub hostname: String,
     /// Global IPv4 forwarding switch used by multilayer switches.
     #[serde(default)]
@@ -242,6 +250,13 @@ impl RunningConfig {
             }
             out.push_str("!\n");
         }
+        for list in self.named_access_lists.values() {
+            writeln!(out, "ip access-list {} {}", list.kind, list.name).unwrap();
+            for (sequence, entry) in &list.entries {
+                writeln!(out, " {sequence} {}", entry.render(list.kind)).unwrap();
+            }
+            out.push_str("!\n");
+        }
         for pool in self.dhcp_pools.values() {
             writeln!(out, "ip dhcp pool {}", pool.name).unwrap();
             if let Some(network) = pool.network {
@@ -279,6 +294,14 @@ impl RunningConfig {
             }
             if let Some(id) = config.access_group_out {
                 writeln!(out, " ip access-group {} out", id.get()).unwrap();
+            }
+            for (direction, id) in [
+                ("in", config.named_access_group_in),
+                ("out", config.named_access_group_out),
+            ] {
+                if let Some(list) = id.and_then(|id| self.named_access_lists.get(&id)) {
+                    writeln!(out, " ip access-group {} {direction}", list.name).unwrap();
+                }
             }
             if let Some(role) = config.nat_role {
                 writeln!(

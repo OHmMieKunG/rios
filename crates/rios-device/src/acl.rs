@@ -31,20 +31,29 @@ impl Device {
         if !self.supports_routing() {
             return Err(DeviceError::AccessListUnsupported);
         }
+        if self.acl_id(&id.get().to_string()).is_some() {
+            return self.set_named_access_group(interface, &id.get().to_string(), direction);
+        }
         if !self.running_config.access_lists.contains_key(&id) {
             return Err(DeviceError::MissingAccessList);
         }
         let config = self.config_mut(interface)?;
         match direction {
-            AccessListDirection::In => config.access_group_in = Some(id),
-            AccessListDirection::Out => config.access_group_out = Some(id),
+            AccessListDirection::In => {
+                config.access_group_in = Some(id);
+                config.named_access_group_in = None;
+            }
+            AccessListDirection::Out => {
+                config.access_group_out = Some(id);
+                config.named_access_group_out = None;
+            }
         }
         Ok(())
     }
 
     /// Evaluate an interface ACL. A configured list has an implicit final deny.
     pub fn permits_ipv4(
-        &self,
+        &mut self,
         interface: InterfaceId,
         direction: AccessListDirection,
         packet: &Ipv4Packet,
@@ -52,6 +61,13 @@ impl Device {
         let Some(config) = self.running_config.interfaces.get(&interface) else {
             return false;
         };
+        let named = match direction {
+            AccessListDirection::In => config.named_access_group_in,
+            AccessListDirection::Out => config.named_access_group_out,
+        };
+        if let Some(id) = named {
+            return self.evaluate_named_acl(id, packet);
+        }
         let id = match direction {
             AccessListDirection::In => config.access_group_in,
             AccessListDirection::Out => config.access_group_out,
@@ -59,11 +75,28 @@ impl Device {
         let Some(id) = id else {
             return true;
         };
+        if let Some(named) = self.acl_id(&id.get().to_string()) {
+            return self.evaluate_named_acl(named, packet);
+        }
         self.access_list_permits(id, packet.source)
     }
 
     /// Evaluate a configured standard ACL against one source address.
     pub fn access_list_permits(&self, id: AccessListId, source: std::net::Ipv4Addr) -> bool {
+        if let Some(named) = self.acl_id(&id.get().to_string()) {
+            let packet = Ipv4Packet {
+                source,
+                destination: std::net::Ipv4Addr::UNSPECIFIED,
+                ttl: 64,
+                protocol: rios_ipv4::IpProtocol::Other(0),
+                payload: Vec::new(),
+            };
+            return self.running_config.named_access_lists[&named]
+                .entries
+                .values()
+                .find_map(|entry| entry.evaluate(&packet))
+                == Some(AccessListAction::Permit);
+        }
         self.running_config
             .access_lists
             .get(&id)
@@ -86,6 +119,19 @@ impl Device {
                     },
                     entry.source,
                     entry.wildcard
+                )
+                .unwrap();
+            }
+        }
+        for (id, list) in &self.running_config.named_access_lists {
+            writeln!(output, "{} IP access list {}", list.kind, list.name).unwrap();
+            for (sequence, entry) in &list.entries {
+                writeln!(
+                    output,
+                    "    {sequence} {} ({} matches, {} logged)",
+                    entry.render(list.kind),
+                    self.acl_match_count(*id, *sequence),
+                    self.acl_logs.get(&(*id, *sequence)).copied().unwrap_or(0)
                 )
                 .unwrap();
             }

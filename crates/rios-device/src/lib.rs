@@ -4,6 +4,7 @@ mod acl;
 mod dhcp;
 mod display;
 mod ethernet;
+mod named_acl;
 mod nat;
 mod network;
 mod ospf;
@@ -112,6 +113,8 @@ pub struct Interface {
 /// A virtual device with privately owned runtime and configuration state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Device {
+    acl_matches: BTreeMap<(rios_config::AclId, u32), u64>,
+    acl_logs: BTreeMap<(rios_config::AclId, u32), u64>,
     id: DeviceId,
     device_type: DeviceType,
     interfaces: BTreeMap<InterfaceId, Interface>,
@@ -154,6 +157,10 @@ struct StpInstance {
 /// Rejected state changes leave the device unchanged.
 #[derive(Debug, thiserror::Error)]
 pub enum DeviceError {
+    #[error("invalid access-list name, kind, sequence, or rule")]
+    InvalidAccessList,
+    #[error("access-list capacity exceeded")]
+    AccessListCapacity,
     #[error("operation requires an Ethernet subinterface")]
     NotSubinterface,
     #[error("VLAN or native encapsulation already belongs to another subinterface")]
@@ -245,10 +252,13 @@ impl Device {
             vlans.insert(VlanId::DEFAULT, VlanConfig::default());
         }
         Ok(Self {
+            acl_matches: BTreeMap::new(),
+            acl_logs: BTreeMap::new(),
             id,
             device_type,
             interfaces: BTreeMap::new(),
             running_config: RunningConfig {
+                named_access_lists: BTreeMap::new(),
                 hostname: hostname.into(),
                 ip_routing: false,
                 interfaces: BTreeMap::new(),
@@ -379,6 +389,8 @@ impl Device {
         self.running_config.interfaces.insert(
             id,
             InterfaceConfig {
+                named_access_group_in: None,
+                named_access_group_out: None,
                 parent: None,
                 dot1q: None,
                 name,
