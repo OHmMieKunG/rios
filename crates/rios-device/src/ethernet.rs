@@ -17,6 +17,8 @@ pub struct MacEntry {
 /// Observable reasons a virtual interface discards a frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, thiserror::Error)]
 pub enum DropReason {
+    #[error("NAT allocation or translation failed")]
+    NatFailed,
     #[error("transmit queue is full")]
     QueueFull,
     #[error("simulated link loss")]

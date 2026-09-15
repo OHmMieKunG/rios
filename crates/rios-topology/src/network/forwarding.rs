@@ -26,10 +26,18 @@ impl Lab {
         };
         let mut forwarded = packet;
         let now = self.now();
-        self.devices
+        let translated = self
+            .devices
             .get_mut(&interface.device)
             .unwrap()
-            .translate_nat_outbound(interface.interface, route.interface, &mut forwarded, now);
+            .nat_outbound(interface.interface, route.interface, &mut forwarded, now);
+        if translated == rios_device::NatOutcome::Drop {
+            self.devices
+                .get_mut(&interface.device)
+                .ok_or(DropReason::NatFailed)?
+                .record_drop_reason(interface.interface, DropReason::NatFailed)?;
+            return Ok(());
+        }
         forwarded.ttl -= 1;
         self.send_ipv4_packet(interface.device, forwarded)?;
         Ok(())

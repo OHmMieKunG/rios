@@ -1,7 +1,9 @@
 //! Structured configuration and deterministic IOS-style rendering.
 #![forbid(unsafe_code)]
 mod acl;
+mod nat;
 pub use acl::{AccessList, AclEntry, AclId, AclKind, AclProtocol, AddressMatch, PortMatch};
+pub use nat::{NatPool, NatPoolRule, NatTransport, StaticNat};
 use rios_ipv4::{Ipv4InterfaceConfig, Ipv4Network};
 use rios_simulator::InterfaceId;
 use serde::{Deserialize, Serialize};
@@ -194,6 +196,12 @@ pub struct DhcpPoolConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunningConfig {
     #[serde(default)]
+    pub static_nat: BTreeSet<StaticNat>,
+    #[serde(default)]
+    pub nat_pools: BTreeMap<String, NatPool>,
+    #[serde(default)]
+    pub nat_pool_rule: Option<NatPoolRule>,
+    #[serde(default)]
     pub named_access_lists: BTreeMap<AclId, AccessList>,
     pub hostname: String,
     /// Global IPv4 forwarding switch used by multilayer switches.
@@ -364,6 +372,51 @@ impl RunningConfig {
                 prefix.address(),
                 prefix.mask(),
                 next_hop
+            )
+            .unwrap();
+        }
+        for (name, pool) in &self.nat_pools {
+            if let Ok(network) = Ipv4Network::new(pool.first, pool.prefix_len) {
+                writeln!(
+                    out,
+                    "ip nat pool {name} {} {} netmask {}",
+                    pool.first,
+                    pool.last,
+                    network.mask()
+                )
+                .unwrap();
+            }
+        }
+        for rule in &self.static_nat {
+            match rule {
+                StaticNat::Address { local, global } => {
+                    writeln!(out, "ip nat inside source static {local} {global}").unwrap()
+                }
+                StaticNat::Port {
+                    protocol,
+                    local,
+                    local_port,
+                    global,
+                    global_port,
+                } => writeln!(
+                    out,
+                    "ip nat inside source static {} {local} {local_port} {global} {global_port}",
+                    if *protocol == NatTransport::Tcp {
+                        "tcp"
+                    } else {
+                        "udp"
+                    }
+                )
+                .unwrap(),
+            }
+        }
+        if let Some(rule) = &self.nat_pool_rule {
+            writeln!(
+                out,
+                "ip nat inside source list {} pool {}{}",
+                rule.access_list.get(),
+                rule.pool,
+                if rule.overload { " overload" } else { "" }
             )
             .unwrap();
         }

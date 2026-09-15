@@ -98,9 +98,15 @@ impl Lab {
         {
             return Ok(());
         }
+        let now = self.now();
         if !self
             .device(interface.device)?
             .owns_ipv4(interface.interface, packet.target_ip)
+            && !self
+                .devices
+                .get_mut(&interface.device)
+                .ok_or(DropReason::NoLink)?
+                .nat_owns_address(interface.interface, packet.target_ip, now)
         {
             return Ok(());
         }

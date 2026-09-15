@@ -14,7 +14,7 @@ mod subinterface;
 mod tcp;
 pub use dhcp::{DhcpBinding, DhcpLease, DhcpOffer};
 pub use ethernet::{DropReason, MacEntry};
-pub use nat::{NatProtocol, NatTranslation};
+pub use nat::{NatOutcome, NatProtocol, NatStatistics, NatTranslation};
 pub use network::{ArpEntry, ResolvedRoute};
 use rios_config::{
     AccessListDirection, AccessListId, AdminState, InterfaceConfig, RunningConfig, StartupConfig,
@@ -134,6 +134,7 @@ pub struct Device {
     dhcp_bindings: BTreeMap<MacAddress, DhcpBinding>,
     dhcp_offers: BTreeMap<MacAddress, DhcpOffer>,
     nat_translations: Vec<NatTranslation>,
+    nat_statistics: NatStatistics,
     next_nat_port: u16,
 }
 
@@ -267,6 +268,9 @@ impl Device {
             device_type,
             interfaces: BTreeMap::new(),
             running_config: RunningConfig {
+                static_nat: BTreeSet::new(),
+                nat_pools: BTreeMap::new(),
+                nat_pool_rule: None,
                 named_access_lists: BTreeMap::new(),
                 hostname: hostname.into(),
                 ip_routing: false,
@@ -287,6 +291,7 @@ impl Device {
             dhcp_bindings: BTreeMap::new(),
             dhcp_offers: BTreeMap::new(),
             nat_translations: Vec::new(),
+            nat_statistics: NatStatistics::default(),
             next_nat_port: 10_000,
         })
     }
