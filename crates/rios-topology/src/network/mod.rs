@@ -23,6 +23,7 @@ mod dhcp;
 mod forwarding;
 mod icmp;
 mod ingress;
+pub(crate) mod ipv6;
 mod lacp;
 mod ospf;
 mod ping;

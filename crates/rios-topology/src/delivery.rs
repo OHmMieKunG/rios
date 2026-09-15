@@ -332,6 +332,10 @@ impl Lab {
                 EventOutcome::LinkStateChanged { link, state }
             }
             SimulationEvent::TimerExpired { timer } => EventOutcome::TimerExpired { timer },
+            SimulationEvent::Ipv6Timer { device, generation } => {
+                self.tick_ipv6(device, generation)?;
+                return Ok(None);
+            }
             SimulationEvent::OspfHello { device, generation } => {
                 self.send_ospf_packets(device, generation)?;
                 return Ok(None);

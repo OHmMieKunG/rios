@@ -1434,6 +1434,7 @@ dependencies = [
  "rios-device",
  "rios-ethernet",
  "rios-ipv4",
+ "rios-ipv6",
  "rios-simulator",
  "thiserror",
 ]
@@ -1444,6 +1445,7 @@ version = "0.1.0"
 dependencies = [
  "rios-ethernet",
  "rios-ipv4",
+ "rios-ipv6",
  "rios-simulator",
  "serde",
 ]
@@ -1455,6 +1457,7 @@ dependencies = [
  "rios-config",
  "rios-ethernet",
  "rios-ipv4",
+ "rios-ipv6",
  "rios-protocol",
  "rios-routing",
  "rios-simulator",
@@ -1530,6 +1533,7 @@ dependencies = [
  "rios-device",
  "rios-ethernet",
  "rios-ipv4",
+ "rios-ipv6",
  "rios-protocol",
  "rios-routing",
  "rios-simulator",

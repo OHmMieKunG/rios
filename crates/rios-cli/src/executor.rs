@@ -57,6 +57,10 @@ fn executable_after_do(command: &Command) -> bool {
             | Command::ShowArp
             | Command::ShowMacAddressTable
             | Command::ShowVlanBrief
+            | Command::ShowIpv6InterfaceBrief
+            | Command::ShowIpv6Neighbors
+            | Command::ShowIpv6Route
+            | Command::PingIpv6 { .. }
             | Command::ShowIpOspf
             | Command::ShowIpProtocols
             | Command::ShowIpOspfNeighborDetail
@@ -110,6 +114,14 @@ pub fn execute_at(
             | AccessListConfiguration(_, _)
     );
     let valid = match &command {
+        Command::SetIpv6Routing(_) | Command::SetIpv6Route { .. } => mode == GlobalConfiguration,
+        Command::SetIpv6Port(_) => matches!(
+            mode,
+            InterfaceConfiguration(_)
+                | SubinterfaceConfiguration(_)
+                | InterfaceRangeConfiguration(_, _)
+        ),
+
         Command::Enable => mode == UserExec,
         Command::Disable
         | Command::ConfigureTerminal
@@ -208,6 +220,10 @@ pub fn execute_at(
         | Command::ShowArp
         | Command::ShowMacAddressTable
         | Command::ShowVlanBrief
+        | Command::ShowIpv6InterfaceBrief
+        | Command::ShowIpv6Neighbors
+        | Command::ShowIpv6Route
+        | Command::PingIpv6 { .. }
         | Command::ShowIpOspf
         | Command::ShowIpProtocols
         | Command::ShowIpOspfNeighborDetail
@@ -526,6 +542,78 @@ pub fn execute_at(
             device.save_config();
             result.output = "Building configuration...\n[OK]\n".into();
             result.persist = true;
+        }
+
+        Command::SetIpv6Routing(enabled) => device.set_ipv6_routing(enabled)?,
+        Command::SetIpv6Port(option) => edit_interfaces(device, mode, |device, id| {
+            let mut policy = device.running_config().interfaces[&id].ipv6.clone();
+            match option {
+                Ipv6PortOption::Enable(value) => policy.enabled = value,
+                Ipv6PortOption::Autoconfig(value) => policy.autoconfig = value,
+                Ipv6PortOption::RaSuppress(value) => policy.ra_suppress = value,
+                Ipv6PortOption::Address(address, true) => {
+                    policy
+                        .addresses
+                        .retain(|old| old.address() != address.address());
+                    policy.addresses.insert(address);
+                }
+                Ipv6PortOption::Address(address, false) => {
+                    policy.addresses.remove(&address);
+                }
+                Ipv6PortOption::LinkLocal(address, true) => policy.link_local = Some(address),
+                Ipv6PortOption::LinkLocal(address, false) => {
+                    if policy.link_local == Some(address) {
+                        policy.link_local = None;
+                    }
+                }
+                Ipv6PortOption::ClearAddresses => {
+                    policy.addresses.clear();
+                    policy.link_local = None;
+                    policy.autoconfig = false;
+                }
+            }
+            device.set_ipv6_policy(id, policy)
+        })?,
+        Command::SetIpv6Route {
+            prefix,
+            interface,
+            next_hop,
+            present,
+        } => {
+            let interface = interface
+                .map(|name| {
+                    device
+                        .find_interface(&name)
+                        .ok_or(rios_device::DeviceError::MissingInterface)
+                })
+                .transpose()?;
+            device.set_ipv6_static_route(
+                rios_config::Ipv6StaticRoute {
+                    prefix,
+                    next_hop,
+                    interface,
+                },
+                present,
+            )?;
+        }
+        Command::ShowIpv6InterfaceBrief => result.output = device.show_ipv6_interface_brief(),
+        Command::ShowIpv6Neighbors => result.output = device.show_ipv6_neighbors(now),
+        Command::ShowIpv6Route => result.output = device.show_ipv6_route(),
+        Command::PingIpv6 {
+            destination,
+            interface,
+        } => {
+            let interface = interface
+                .map(|name| {
+                    device
+                        .find_interface(&name)
+                        .ok_or(rios_device::DeviceError::MissingInterface)
+                })
+                .transpose()?;
+            result.request = Some(SimulationRequest::PingIpv6 {
+                destination,
+                interface,
+            });
         }
         Command::Ping(address) => result.request = Some(SimulationRequest::Ping(address)),
         Command::NetworkUnavailable(feature) => {

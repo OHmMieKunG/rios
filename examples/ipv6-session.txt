@@ -1,0 +1,22 @@
+connect R1
+enable
+conf t
+ipv6 unicast-routing
+int gi0/0
+ipv6 address 2001:db8:1::1/64
+no shut
+end
+exit
+connect R2
+enable
+conf t
+int gi0/0
+ipv6 address autoconfig
+no shut
+end
+ping ipv6 2001:db8:1::1
+show ipv6 interface brief
+show ipv6 neighbors
+show ipv6 route
+exit
+exit

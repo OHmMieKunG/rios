@@ -1063,3 +1063,70 @@ fn ospf_external_policy_help_and_configuration_share_grammar() {
     let config = device.running_config().ospf.as_ref().unwrap();
     assert!(config.default_information.is_none() && config.redistribute_static.is_none());
 }
+
+#[test]
+fn ipv6_configuration_help_no_and_do_replay() {
+    let mut router = Device::standalone();
+    let mut session = CliSession {
+        mode: CliMode::GlobalConfiguration,
+    };
+    for command in [
+        "ipv6 unicast-routing",
+        "int gi0/0",
+        "ipv6 enable",
+        "ipv6 address 2001:db8:1::1/64",
+        "ipv6 address fe80::1 link-local",
+        "ipv6 nd ra suppress",
+        "exit",
+        "ipv6 route 2001:db8:2::/64 gi0/0 fe80::2",
+        "int gi0/1",
+        "ipv6 address autoconfig",
+        "do sh ipv6 int br",
+        "end",
+    ] {
+        run(&mut router, &mut session, command).unwrap();
+    }
+    let mut restored = Device::standalone();
+    load_configuration(&mut restored, &router.running_config().render()).unwrap();
+    assert_eq!(restored.running_config(), router.running_config());
+    assert!(matches!(
+        parse("ping ipv6 2001:db8::1", session.mode).unwrap(),
+        ParsedInput::Command(Command::PingIpv6 { .. })
+    ));
+    assert!(
+        run(&mut router, &mut session, "ping ipv6 fe80::2 source gi0/0")
+            .unwrap()
+            .request
+            .is_some()
+    );
+    let mode = CliMode::InterfaceConfiguration(InterfaceId(1));
+    assert!(
+        suggestions("ipv6 address ", mode, &[])
+            .unwrap()
+            .iter()
+            .any(|s| s.word == "autoconfig")
+    );
+    assert_eq!(
+        suggestions("ipv6 address fe80::1 ", mode, &[]).unwrap()[0].word,
+        "link-local"
+    );
+    assert!(parse("ipv6 address 2001:db8::1/129", mode).is_err());
+    for command in [
+        "conf t",
+        "no ipv6 unicast-routing",
+        "no ipv6 route 2001:db8:2::/64 gi0/0 fe80::2",
+        "int gi0/0",
+        "no ipv6 address fe80::1 link-local",
+        "no ipv6 address 2001:db8:1::1/64",
+        "no ipv6 nd ra suppress",
+        "no ipv6 enable",
+        "int gi0/1",
+        "no ipv6 address autoconfig",
+        "no ipv6 address",
+    ] {
+        run(&mut router, &mut session, command).unwrap();
+    }
+    assert!(!router.has_ipv6());
+    assert!(router.running_config().ipv6_static_routes.is_empty());
+    assert!(!router.running_config().ipv6_unicast_routing);
+}

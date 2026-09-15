@@ -1,6 +1,11 @@
 //! Device inventory and validated state transitions, independent of CLI syntax.
 #![forbid(unsafe_code)]
 mod acl;
+mod ipv6;
+pub use ipv6::{
+    Ipv6AddressEntry, Ipv6AddressOrigin, Ipv6AddressState, Ipv6ControlPacket, Ipv6Neighbor,
+    Ipv6NeighborState, Ipv6Route, Ipv6RouteSource, ResolvedIpv6Route,
+};
 mod channel;
 mod lacp;
 pub use lacp::LacpNeighbor;
@@ -121,6 +126,7 @@ pub struct Interface {
 /// A virtual device with privately owned runtime and configuration state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Device {
+    ipv6: ipv6::Ipv6Runtime,
     stp_errdisabled: BTreeSet<InterfaceId>,
     lacp_neighbors: BTreeMap<InterfaceId, LacpNeighbor>,
     tcp: tcp::TcpRuntime,
@@ -202,6 +208,8 @@ pub enum DeviceError {
     InvalidOspfProcess,
     #[error("invalid OSPF interface timers, cost, router ID, or capacity")]
     InvalidOspfConfig,
+    #[error("invalid IPv6 policy, address, route, or capacity")]
+    InvalidIpv6Config,
     #[error("OSPF requires a routing-capable device")]
     OspfUnsupported,
     #[error("access lists require a routing-capable device")]
@@ -275,7 +283,10 @@ impl Device {
             id,
             device_type,
             interfaces: BTreeMap::new(),
+            ipv6: ipv6::Ipv6Runtime::default(),
             running_config: RunningConfig {
+                ipv6_unicast_routing: false,
+                ipv6_static_routes: BTreeSet::new(),
                 spanning_tree: rios_config::StpConfig::default(),
                 dhcp_excluded: BTreeMap::new(),
                 static_nat: BTreeSet::new(),
@@ -417,6 +428,7 @@ impl Device {
         self.running_config.interfaces.insert(
             id,
             InterfaceConfig {
+                ipv6: rios_config::Ipv6InterfacePolicy::default(),
                 ospf: rios_config::OspfInterfaceConfig::default(),
                 spanning_tree: rios_config::StpPortConfig::default(),
                 channel_group: None,
@@ -576,6 +588,7 @@ impl Device {
     ) -> Result<(), DeviceError> {
         self.config_mut(id)?.admin_state = state;
         if state == AdminState::Down {
+            self.reset_ipv6_interface(id);
             self.stp_errdisabled.remove(&id);
             self.lacp_neighbors.remove(&id);
             for instance in self.stp_runtime.values_mut() {
@@ -648,8 +661,10 @@ impl Device {
         }
         let config = self.config_mut(id)?;
         config.ipv4 = None;
+        config.ipv6 = rios_config::Ipv6InterfacePolicy::default();
         config.dhcp_client = false;
         config.switchport.get_or_insert_default();
+        self.reset_ipv6_interface(id);
         self.sync_channel_switchports(id);
         Ok(())
     }
@@ -821,6 +836,14 @@ impl Device {
 
     /// Update physical carrier from the simulation layer.
     pub fn set_link_state(&mut self, id: InterfaceId, state: LinkState) -> Result<(), DeviceError> {
+        if state == LinkState::Down
+            && self
+                .interfaces
+                .get(&id)
+                .is_some_and(|port| port.link_state != state)
+        {
+            self.reset_ipv6_interface(id);
+        }
         self.interfaces
             .get_mut(&id)
             .ok_or(DeviceError::MissingInterface)?

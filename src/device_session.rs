@@ -33,9 +33,20 @@ pub fn process(
             match lab.with_device_mut(id, |device| execute_at(device, session, command, now)) {
                 Ok(Ok(mut result)) => {
                     output.push_str(&result.output);
-                    if let Some(SimulationRequest::Ping(destination)) = result.request.take() {
-                        match lab.ping(id, destination) {
-                            Ok(ping) => output.push_str(&ping.render()),
+                    if let Some(request) = result.request.take() {
+                        let ping = match request {
+                            SimulationRequest::Ping(destination) => {
+                                lab.ping(id, destination).map(|ping| ping.render())
+                            }
+                            SimulationRequest::PingIpv6 {
+                                destination,
+                                interface,
+                            } => lab
+                                .ping_ipv6(id, destination, interface)
+                                .map(|ping| ping.render()),
+                        };
+                        match ping {
+                            Ok(rendered) => output.push_str(&rendered),
                             Err(error) => {
                                 output.push_str(&format!("% {error}\n"));
                                 success = false;

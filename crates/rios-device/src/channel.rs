@@ -44,6 +44,7 @@ impl Device {
         }
         let config = self.running_config.interfaces[&interface].clone();
         if config.ipv4.is_some()
+            || config.ipv6.active()
             || config.dhcp_client
             || config
                 .channel_group

@@ -1,5 +1,6 @@
 mod acl;
 mod dhcp;
+mod ipv6;
 mod nat;
 mod ospf;
 use crate::{
@@ -165,7 +166,12 @@ fn parse_input(
     let action = node.action.ok_or(ParseError::Incomplete)?;
     let args = &words[index..];
     let expected = match action {
-        Action::OspfDefault
+        Action::Ipv6Address
+        | Action::NoIpv6Address
+        | Action::Ipv6Route
+        | Action::NoIpv6Route
+        | Action::PingIpv6
+        | Action::OspfDefault
         | Action::OspfRedistribute
         | Action::Address
         | Action::AccessList
@@ -215,7 +221,10 @@ fn parse_input(
         && args.is_empty()
         && !matches!(
             action,
-            Action::Interfaces | Action::OspfDefault | Action::OspfRedistribute
+            Action::Interfaces
+                | Action::NoIpv6Address
+                | Action::OspfDefault
+                | Action::OspfRedistribute
         )
         || expected != usize::MAX && args.len() < expected
     {
@@ -239,6 +248,21 @@ fn parse_input(
     };
     use Action::*;
     let command = match action {
+        Ipv6Routing => Command::SetIpv6Routing(true),
+        NoIpv6Routing => Command::SetIpv6Routing(false),
+        Ipv6Enable => Command::SetIpv6Port(Ipv6PortOption::Enable(true)),
+        NoIpv6Enable => Command::SetIpv6Port(Ipv6PortOption::Enable(false)),
+        Ipv6Address | NoIpv6Address => {
+            ipv6::interface_address(args, matches!(action, Ipv6Address))?
+        }
+        Ipv6Route | NoIpv6Route => ipv6::route(args, matches!(action, Ipv6Route))?,
+        Ipv6RaSuppress => Command::SetIpv6Port(Ipv6PortOption::RaSuppress(true)),
+        NoIpv6RaSuppress => Command::SetIpv6Port(Ipv6PortOption::RaSuppress(false)),
+        Ipv6Brief => Command::ShowIpv6InterfaceBrief,
+        Ipv6Neighbors => Command::ShowIpv6Neighbors,
+        Ipv6Routes => Command::ShowIpv6Route,
+        PingIpv6 => ipv6::ping(args)?,
+
         NamedStandardAcl | NamedExtendedAcl => Command::EnterAccessList {
             name: args[0].text.into(),
             kind: if matches!(action, NamedStandardAcl) {
@@ -307,6 +331,10 @@ fn parse_input(
                     | Command::ShowArp
                     | Command::ShowMacAddressTable
                     | Command::ShowVlanBrief
+                    | Command::ShowIpv6InterfaceBrief
+                    | Command::ShowIpv6Neighbors
+                    | Command::ShowIpv6Route
+                    | Command::PingIpv6 { .. }
                     | Command::ShowIpOspf
                     | Command::ShowIpProtocols
                     | Command::ShowIpOspfNeighborDetail
@@ -1047,6 +1075,13 @@ pub fn suggestions(
                     "<wildcard>"
                 }
                 Action::AccessGroup if args.len() == 1 => "in|out",
+                Action::Ipv6Address
+                | Action::NoIpv6Address
+                | Action::Ipv6Route
+                | Action::NoIpv6Route
+                | Action::PingIpv6 => {
+                    return ipv6::suggest(action, args, partial, start);
+                }
                 Action::OspfDefault | Action::OspfRedistribute => {
                     return ospf::suggest(action, args, partial, start);
                 }

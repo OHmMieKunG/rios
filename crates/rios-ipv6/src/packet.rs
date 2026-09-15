@@ -66,7 +66,11 @@ pub enum PacketError {
     #[error("IPv6 authentication or encryption is unsupported")]
     SecurityHeader,
     #[error("invalid IPv6 extension at byte {pointer}")]
-    ParameterProblem { pointer: u32, send_icmp: bool },
+    ParameterProblem {
+        pointer: u32,
+        code: u8,
+        send_icmp: bool,
+    },
 }
 /// Original IPv6 packet, including extension bytes when next_header names an extension.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,6 +89,7 @@ pub struct UpperLayer<'a> {
     pub protocol: NextHeader,
     pub payload: &'a [u8],
     pub next_header_offset: u32,
+    pub had_fragment_header: bool,
 }
 impl Ipv6Packet {
     pub fn encode(&self) -> Result<Vec<u8>, PacketError> {
@@ -130,12 +135,14 @@ impl Ipv6Packet {
         let mut offset = 0usize;
         let mut next = self.next_header;
         let mut next_offset = 6;
+        let mut had_fragment_header = false;
         for _ in 0..16 {
             match next {
                 NextHeader::HopByHop | NextHeader::DestinationOptions | NextHeader::Routing => {
                     if next == NextHeader::HopByHop && offset != 0 {
                         return Err(PacketError::ParameterProblem {
                             pointer: next_offset,
+                            code: 1,
                             send_icmp: true,
                         });
                     }
@@ -152,6 +159,7 @@ impl Ipv6Packet {
                         if body[3] != 0 {
                             return Err(PacketError::ParameterProblem {
                                 pointer: (40 + offset + 2) as u32,
+                                code: 0,
                                 send_icmp: true,
                             });
                         }
@@ -163,6 +171,10 @@ impl Ipv6Packet {
                     offset += length;
                 }
                 NextHeader::Fragment => {
+                    if had_fragment_header {
+                        return Err(PacketError::Malformed);
+                    }
+                    had_fragment_header = true;
                     let body = self
                         .payload
                         .get(offset..offset + 8)
@@ -185,6 +197,7 @@ impl Ipv6Packet {
                         protocol: next,
                         payload: &[],
                         next_header_offset: next_offset,
+                        had_fragment_header,
                     });
                 }
                 _ => {
@@ -192,6 +205,7 @@ impl Ipv6Packet {
                         protocol: next,
                         payload: &self.payload[offset..],
                         next_header_offset: next_offset,
+                        had_fragment_header,
                     });
                 }
             }
@@ -219,6 +233,7 @@ fn validate_options(body: &[u8], base: usize, multicast: bool) -> Result<(), Pac
             _ => {
                 return Err(PacketError::ParameterProblem {
                     pointer: (base + pos) as u32,
+                    code: 2,
                     send_icmp: kind >> 6 == 2 || (kind >> 6 == 3 && !multicast),
                 });
             }

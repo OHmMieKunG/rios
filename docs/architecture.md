@@ -450,3 +450,40 @@ loss/retransmission recovery, DR/BDR failover, passive/timer mismatch, cost chan
 Type 3/4/5 propagation through three areas, route withdrawal, conditional default
 origination, overlapping prefixes, LSA aging and rejection of older instances.
 Protocol design follows [RFC 2328](https://www.rfc-editor.org/rfc/rfc2328).
+
+## IPv6 data plane
+
+`rios-ipv6` owns independent IPv6 and ICMPv6 wire codecs, bounded extension-header
+parsing, address types and neighbor discovery messages. Devices maintain scoped
+neighbor caches, DAD state, SLAAC lifetimes, learned router/prefix lifetimes and
+IPv6 routes separately from IPv4. NS, NA, RS and RA traverse Ethernet links,
+including VLAN subinterfaces. Forwarding decrements hop limit and sends actual
+ICMPv6 errors for expiry, missing routes and oversized packets. Link-local
+addresses require an interface scope when more than one interface can match.
+
+Configuration supports `ipv6 unicast-routing`, static `ipv6 route`, interface
+`ipv6 enable`, `ipv6 address`, `ipv6 address autoconfig`, explicit link-local
+addresses and RA suppression. Show commands expose addresses, neighbors and
+routes; `ping ipv6 ADDRESS [source INTERFACE]` uses the same virtual network.
+Configuration, contextual help, abbreviation and replay share the CLI engine.
+
+```sh
+cargo run -- lab examples/two-routers.yaml < examples/ipv6-session.txt
+```
+
+Protocol deadlines use simulation time. Address tables are bounded to 32 per
+interface, neighbor/static-route/prefix tables to 4096 per device, learned
+routers to 256, and unresolved traffic to 4096 packets per lab and 256 per port.
+Tests cover DAD conflicts and recovery, neighbor reachability probes, SLAAC
+preferred/valid lifetime expiry and the two-hour rule, static multi-router
+forwarding, hop-limit/unreachable errors, scoped link-local ping and VLAN routing.
+
+Fragment reassembly, IPsec processing, DHCPv6, privacy addresses, RDNSS and IPv6
+TCP/UDP services are not implemented. Atomic fragments are accepted for ordinary
+traffic but rejected for ND. Neighbor reachability/retransmission and periodic
+RA intervals currently use fixed defaults; received RA timer/MTU hints do not
+change these defaults. The implementation follows public
+[RFC 8200](https://www.rfc-editor.org/rfc/rfc8200),
+[RFC 4443](https://www.rfc-editor.org/rfc/rfc4443),
+[RFC 4861](https://www.rfc-editor.org/rfc/rfc4861) and
+[RFC 4862](https://www.rfc-editor.org/rfc/rfc4862).

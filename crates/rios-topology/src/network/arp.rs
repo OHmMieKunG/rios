@@ -82,6 +82,7 @@ impl Lab {
         let now = self.now();
         // ponytail: linear queue is sufficient until concurrent unresolved flows are measured in bulk.
         self.pending_ipv4.retain(|packet| packet.expires_at >= now);
+        self.purge_ipv6_pending();
     }
 
     pub(super) fn handle_arp(

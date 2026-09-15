@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 /// Single owner of a lab's devices, links, clock, and pending traffic.
 #[derive(Debug, Default)]
 pub struct Lab {
+    pub(crate) ipv6_generations: BTreeMap<DeviceId, u64>,
+    pub(crate) pending_ipv6: Vec<crate::network::ipv6::PendingIpv6>,
     pub(crate) lacp_timers: std::collections::BTreeSet<DeviceId>,
     pub(crate) tcp_timers: std::collections::BTreeSet<DeviceId>,
     pub(crate) capture: Option<crate::capture::Capture>,
@@ -281,6 +283,7 @@ impl Lab {
         self.refresh_carriers()?;
         self.schedule_lacp(id)?;
         self.schedule_ospf_now(id)?;
+        self.schedule_ipv6_now(id)?;
         self.schedule_stp_now(id)?;
         self.schedule_dhcp_now(id)?;
         Ok(result)

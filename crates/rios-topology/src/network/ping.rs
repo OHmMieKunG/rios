@@ -4,19 +4,19 @@ use std::fmt::Write;
 const PING_COUNT: u16 = 5;
 /// A completed deterministic ping operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PingResult {
+pub struct PingResult<A = Ipv4Addr> {
     /// Requested destination.
-    pub destination: Ipv4Addr,
+    pub destination: A,
     /// Echo requests attempted.
     pub transmitted: u16,
     /// Matching replies received.
     pub received: u16,
     /// Virtual round-trip duration for each reply.
     pub round_trip_ms: Vec<u64>,
-    markers: String,
+    pub(super) markers: String,
 }
 
-impl PingResult {
+impl<A: std::fmt::Display> PingResult<A> {
     /// Familiar IOS-style summary generated from actual echo replies.
     pub fn render(&self) -> String {
         let mut output = format!(

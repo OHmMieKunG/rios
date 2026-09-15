@@ -37,6 +37,10 @@ impl Link {
 /// Concrete internal events scheduled by the lab, with owned frame payloads.
 #[derive(Debug)]
 pub(crate) enum SimulationEvent {
+    Ipv6Timer {
+        device: rios_simulator::DeviceId,
+        generation: u64,
+    },
     TcpTick {
         device: rios_simulator::DeviceId,
     },
@@ -123,6 +127,8 @@ pub struct TraceRecord {
 /// Topology, device, scheduling, and delivery failures.
 #[derive(Debug, thiserror::Error)]
 pub enum LabError {
+    #[error("no IPv6 route or usable source address for {0}")]
+    NoIpv6Route(std::net::Ipv6Addr),
     #[error(transparent)]
     Tcp(#[from] rios_device::TcpError),
     #[error("capture: {0}")]
@@ -148,3 +154,5 @@ pub enum LabError {
     #[error(transparent)]
     Ping(#[from] PingError),
 }
+
+pub use network::ipv6::Ping6Result;

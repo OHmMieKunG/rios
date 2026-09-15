@@ -2,6 +2,20 @@ use crate::CliMode;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Action {
+    Ipv6Routing,
+    NoIpv6Routing,
+    Ipv6Enable,
+    NoIpv6Enable,
+    Ipv6Address,
+    NoIpv6Address,
+    Ipv6Route,
+    NoIpv6Route,
+    Ipv6RaSuppress,
+    NoIpv6RaSuppress,
+    Ipv6Brief,
+    Ipv6Neighbors,
+    Ipv6Routes,
+    PingIpv6,
     Enable,
     Disable,
     Configure,
@@ -217,6 +231,31 @@ pub(crate) fn tree(mode: CliMode) -> Node {
     match mode {
         CliMode::UserExec | CliMode::PrivilegedExec => {
             root.add(
+                &[("ping", ""), ("ipv6", "Send IPv6 echo requests")],
+                PingIpv6,
+            );
+            root.add(
+                &[
+                    ("show", ""),
+                    ("ipv6", "IPv6 state"),
+                    ("interface", "IPv6 interfaces"),
+                    ("brief", "Address summary"),
+                ],
+                Ipv6Brief,
+            );
+            root.add(
+                &[
+                    ("show", ""),
+                    ("ipv6", ""),
+                    ("neighbors", "IPv6 Neighbor Discovery cache"),
+                ],
+                Ipv6Neighbors,
+            );
+            root.add(
+                &[("show", ""), ("ipv6", ""), ("route", "IPv6 routing table")],
+                Ipv6Routes,
+            );
+            root.add(
                 &[
                     ("show", "Show operational information"),
                     ("interfaces", "Interface status and counters"),
@@ -430,6 +469,31 @@ pub(crate) fn tree(mode: CliMode) -> Node {
             if mode == CliMode::GlobalConfiguration {
                 root.add(
                     &[
+                        ("ipv6", "IPv6 configuration"),
+                        ("unicast-routing", "Forward IPv6 packets"),
+                    ],
+                    Ipv6Routing,
+                );
+                root.add(
+                    &[
+                        ("no", ""),
+                        ("ipv6", ""),
+                        ("unicast-routing", "Disable IPv6 forwarding"),
+                    ],
+                    NoIpv6Routing,
+                );
+                root.add(&[("ipv6", ""), ("route", "Static IPv6 route")], Ipv6Route);
+                root.add(
+                    &[
+                        ("no", ""),
+                        ("ipv6", ""),
+                        ("route", "Remove static IPv6 route"),
+                    ],
+                    NoIpv6Route,
+                );
+
+                root.add(
+                    &[
                         ("ip", "IP configuration"),
                         ("access-list", "Named IPv4 access list"),
                         ("standard", "Match source address"),
@@ -612,6 +676,52 @@ pub(crate) fn tree(mode: CliMode) -> Node {
                     | CliMode::SubinterfaceConfiguration(_)
                     | CliMode::InterfaceRangeConfiguration(_, _)
             ) {
+                root.add(
+                    &[
+                        ("ipv6", "IPv6 interface policy"),
+                        ("enable", "Enable link-local IPv6"),
+                    ],
+                    Ipv6Enable,
+                );
+                root.add(
+                    &[
+                        ("no", ""),
+                        ("ipv6", ""),
+                        ("enable", "Remove explicit IPv6 enable"),
+                    ],
+                    NoIpv6Enable,
+                );
+                root.add(
+                    &[("ipv6", ""), ("address", "IPv6 address or SLAAC")],
+                    Ipv6Address,
+                );
+                root.add(
+                    &[
+                        ("no", ""),
+                        ("ipv6", ""),
+                        ("address", "Remove IPv6 address configuration"),
+                    ],
+                    NoIpv6Address,
+                );
+                root.add(
+                    &[
+                        ("ipv6", ""),
+                        ("nd", "Neighbor Discovery"),
+                        ("ra", "Router advertisements"),
+                        ("suppress", "Suppress advertisements"),
+                    ],
+                    Ipv6RaSuppress,
+                );
+                root.add(
+                    &[
+                        ("no", ""),
+                        ("ipv6", ""),
+                        ("nd", ""),
+                        ("ra", ""),
+                        ("suppress", "Enable advertisements"),
+                    ],
+                    NoIpv6RaSuppress,
+                );
                 for (word, help, set, reset) in [
                     ("cost", "OSPF output cost", OspfCost, NoOspfCost),
                     (

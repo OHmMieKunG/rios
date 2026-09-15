@@ -13,6 +13,16 @@ use rios_ipv4::{Ipv4InterfaceConfig, Ipv4Network};
 use rios_simulator::InterfaceId;
 use std::{collections::BTreeSet, net::Ipv4Addr};
 
+/// One IPv6 interface configuration edit; runtime Neighbor Discovery remains in Device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ipv6PortOption {
+    Enable(bool),
+    Autoconfig(bool),
+    Address(rios_ipv6::Ipv6InterfaceConfig, bool),
+    LinkLocal(std::net::Ipv6Addr, bool),
+    ClearAddresses,
+    RaSuppress(bool),
+}
 /// One independently configurable OSPF interface setting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OspfPortOption {
@@ -117,6 +127,21 @@ pub enum DhcpPoolOption {
 /// Validated syntax, independent of state mutation and terminal I/O.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
+    SetIpv6Routing(bool),
+    SetIpv6Port(Ipv6PortOption),
+    SetIpv6Route {
+        prefix: rios_ipv6::Ipv6Network,
+        interface: Option<String>,
+        next_hop: std::net::Ipv6Addr,
+        present: bool,
+    },
+    ShowIpv6InterfaceBrief,
+    ShowIpv6Neighbors,
+    ShowIpv6Route,
+    PingIpv6 {
+        destination: std::net::Ipv6Addr,
+        interface: Option<String>,
+    },
     EnterAccessList {
         name: String,
         kind: rios_config::AclKind,
@@ -259,5 +284,9 @@ pub enum Command {
 /// Work that requires the owning simulation lab after device-local execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SimulationRequest {
+    PingIpv6 {
+        destination: std::net::Ipv6Addr,
+        interface: Option<InterfaceId>,
+    },
     Ping(Ipv4Addr),
 }

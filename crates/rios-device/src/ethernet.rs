@@ -17,6 +17,10 @@ pub struct MacEntry {
 /// Observable reasons a virtual interface discards a frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, thiserror::Error)]
 pub enum DropReason {
+    #[error("malformed network packet")]
+    MalformedPacket,
+    #[error("neighbor resolution failed")]
+    NeighborUnreachable,
     #[error("EtherChannel member is not collecting or distributing")]
     ChannelInactive,
     #[error("NAT allocation or translation failed")]

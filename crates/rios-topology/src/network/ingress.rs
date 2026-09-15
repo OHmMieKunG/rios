@@ -10,6 +10,7 @@ impl Lab {
         match frame.ethertype {
             EtherType::Arp => self.handle_arp(interface, frame),
             EtherType::Ipv4 => self.handle_ipv4(interface, frame),
+            EtherType::Ipv6 => self.handle_ipv6(interface, frame),
             _ => Ok(()),
         }
     }

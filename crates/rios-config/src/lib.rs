@@ -1,6 +1,8 @@
 //! Structured configuration and deterministic IOS-style rendering.
 #![forbid(unsafe_code)]
 mod acl;
+mod ipv6;
+pub use ipv6::{Ipv6InterfacePolicy, Ipv6StaticRoute};
 mod nat;
 mod ospf;
 pub use ospf::{OspfDefaultRoute, OspfInterfaceConfig, OspfNetworkType, OspfRedistribute};
@@ -28,6 +30,8 @@ pub enum AdminState {
 /// Authoritative configuration for one interface.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InterfaceConfig {
+    #[serde(default)]
+    pub ipv6: Ipv6InterfacePolicy,
     #[serde(default)]
     pub ospf: OspfInterfaceConfig,
     #[serde(default)]
@@ -244,6 +248,10 @@ fn default_lease_seconds() -> u32 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunningConfig {
     #[serde(default)]
+    pub ipv6_unicast_routing: bool,
+    #[serde(default)]
+    pub ipv6_static_routes: BTreeSet<Ipv6StaticRoute>,
+    #[serde(default)]
     pub spanning_tree: StpConfig,
     #[serde(default)]
     pub dhcp_excluded: BTreeMap<Ipv4Addr, Ipv4Addr>,
@@ -280,6 +288,9 @@ impl RunningConfig {
     /// Render stable configuration suitable for configuration-engine replay.
     pub fn render(&self) -> String {
         let mut out = format!("hostname {}\n!\n", self.hostname);
+        if self.ipv6_unicast_routing {
+            out.push_str("ipv6 unicast-routing\n!\n");
+        }
         if self.ip_routing {
             out.push_str("ip routing\n!\n");
         }
@@ -391,6 +402,7 @@ impl RunningConfig {
             if let Some(helper) = config.helper_address {
                 writeln!(out, " ip helper-address {helper}").unwrap();
             }
+            config.ipv6.render(&mut out);
             config.ospf.render(&mut out);
             let stp = &config.spanning_tree;
             if stp.priority != 128 {
@@ -491,6 +503,19 @@ impl RunningConfig {
                 } else {
                     "shutdown"
                 }
+            )
+            .unwrap();
+        }
+        for route in &self.ipv6_static_routes {
+            let interface = route
+                .interface
+                .and_then(|id| self.interfaces.get(&id))
+                .map(|c| format!("{} ", c.name))
+                .unwrap_or_default();
+            writeln!(
+                out,
+                "ipv6 route {} {}{}\n!",
+                route.prefix, interface, route.next_hop
             )
             .unwrap();
         }

@@ -109,6 +109,7 @@ fn extension_options_fragments_and_chain_bounds_are_checked() {
         discard.upper_layer(),
         Err(PacketError::ParameterProblem {
             pointer: 42,
+            code: 2,
             send_icmp: true
         })
     );
@@ -118,6 +119,7 @@ fn extension_options_fragments_and_chain_bounds_are_checked() {
         multicast.upper_layer(),
         Err(PacketError::ParameterProblem {
             pointer: 42,
+            code: 2,
             send_icmp: false
         })
     );
