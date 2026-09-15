@@ -267,6 +267,27 @@ pub fn process(app: &mut App, input: &str) -> bool {
                     if link.is_active() { "up" } else { "down" },
                     link.delay_ms
                 );
+                println!(
+                    "  bandwidth {}, jitter {} us, loss {} ppm, queue {} packets/direction",
+                    link.config.bandwidth.map_or_else(
+                        || "unlimited".into(),
+                        |rate| format!("{} bps", rate.bits_per_second())
+                    ),
+                    link.config.jitter_us,
+                    link.config.loss_ppm,
+                    link.config.queue_packets
+                );
+                for (name, direction) in [("A->B", &link.a_to_b), ("B->A", &link.b_to_a)] {
+                    println!(
+                        "  {name}: queued {}, TX {}, RX {}, queue drops {}, loss drops {}, flap drops {}",
+                        direction.queued(app.lab.now()),
+                        direction.counters.tx_packets,
+                        direction.counters.rx_packets,
+                        direction.counters.queue_drops,
+                        direction.counters.loss_drops,
+                        direction.counters.changed_drops
+                    );
+                }
             }
             Ok(())
         }

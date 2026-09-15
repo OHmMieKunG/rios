@@ -15,8 +15,16 @@ pub struct MacEntry {
 }
 
 /// Observable reasons a virtual interface discards a frame.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, thiserror::Error)]
 pub enum DropReason {
+    #[error("transmit queue is full")]
+    QueueFull,
+    #[error("simulated link loss")]
+    SimulatedLoss,
+    #[error("link is down")]
+    LinkDown,
+    #[error("spanning-tree port is blocking")]
+    StpBlocking,
     #[error("interface is down")]
     InterfaceDown,
     #[error("interface has no virtual link")]
@@ -35,6 +43,22 @@ pub enum DropReason {
     AccessList,
 }
 impl Device {
+    /// Account for a drop with its observable reason.
+    pub fn record_drop_reason(
+        &mut self,
+        id: InterfaceId,
+        reason: DropReason,
+    ) -> Result<(), DeviceError> {
+        self.record_drop(id)?;
+        let counters = &mut self
+            .interfaces
+            .get_mut(&id)
+            .ok_or(DeviceError::MissingInterface)?
+            .counters;
+        let count = counters.drop_reasons.entry(reason).or_default();
+        *count = count.saturating_add(1);
+        Ok(())
+    }
     /// Learn or move a unicast source address on a switch port.
     pub fn learn_mac(
         &mut self,

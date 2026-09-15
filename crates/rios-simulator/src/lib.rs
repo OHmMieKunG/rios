@@ -23,7 +23,11 @@ pub enum LinkState {
     Up,
 }
 
+mod link;
 mod queue;
+pub use link::{
+    Admission, Bandwidth, DirectionalLinkRuntime, LinkConfig, LinkCounters, SimulationRng,
+};
 pub use queue::{EventQueue, ScheduleError, ScheduledEvent, SimTime};
 
 /// Globally identifies an interface within a lab.

@@ -13,6 +13,11 @@ impl Lab {
         let link_id = self.ports.get(&source).copied();
         let check = if link_id.is_none() {
             Err(DropReason::NoLink)
+        } else if link_id
+            .and_then(|id| self.links.get(&id))
+            .is_some_and(|link| link.state == LinkState::Down)
+        {
+            Err(DropReason::LinkDown)
         } else {
             self.device(source.device)?
                 .check_frame(source.interface, &frame, false)
@@ -21,44 +26,46 @@ impl Lab {
             self.devices
                 .get_mut(&source.device)
                 .unwrap()
-                .record_drop(source.interface)?;
+                .record_drop_reason(source.interface, reason)?;
             self.trace_frame(source, TraceAction::Drop(reason), &frame);
             return Err(reason.into());
         }
-        let link = &self.links[&link_id.unwrap()];
-        let target = if source == link.endpoint_a {
-            link.endpoint_b
+        let now = self.now();
+        let jitter = self.rng.sample();
+        let loss = self.rng.sample();
+        let link = self
+            .links
+            .get_mut(&link_id.ok_or(DropReason::NoLink)?)
+            .ok_or(DropReason::NoLink)?;
+        let (target, runtime) = if source == link.endpoint_a {
+            (link.endpoint_b, &mut link.a_to_b)
         } else {
-            link.endpoint_a
+            (link.endpoint_a, &mut link.b_to_a)
         };
-        let time = self
-            .now()
-            .0
-            .checked_add(
-                link.delay_ms
-                    .checked_mul(1000)
-                    .ok_or(rios_simulator::ScheduleError::Overflow)?,
-            )
-            .ok_or(rios_simulator::ScheduleError::Overflow)?;
         let length = frame.len();
-        let trace = TraceRecord {
-            time: self.now(),
-            interface: source,
-            action: TraceAction::Tx,
-            ethertype: frame.ethertype,
-            length,
+        let admission = runtime.admit(&link.config, now, length, jitter, loss)?;
+        let rios_simulator::Admission::Scheduled { arrival, lost } = admission else {
+            self.devices
+                .get_mut(&source.device)
+                .ok_or(DropReason::NoLink)?
+                .record_drop_reason(source.interface, DropReason::QueueFull)?;
+            self.trace_frame(source, TraceAction::Drop(DropReason::QueueFull), &frame);
+            return Err(DropReason::QueueFull.into());
         };
-        let event = SimulationEvent::FrameReceived {
-            link: link.id,
-            generation: link.generation,
-            interface: target,
-            frame,
-        };
-        // Schedule before updating TX counters; a scheduling error is not a transmission.
-        self.events.schedule_at(SimTime(time), event)?;
-        if self.tracing {
-            self.trace.push(trace);
-        }
+        let id = link.id;
+        let generation = link.generation;
+        self.trace_frame(source, TraceAction::Tx, &frame);
+        self.events.schedule_at(
+            arrival,
+            SimulationEvent::FrameReceived {
+                link: id,
+                generation,
+                interface: target,
+                source,
+                lost,
+                frame,
+            },
+        )?;
         self.devices.get_mut(&source.device).unwrap().record_frame(
             source.interface,
             length,
@@ -67,19 +74,30 @@ impl Lab {
         Ok(())
     }
 
+    fn transmit_protocol(
+        &mut self,
+        source: InterfaceRef,
+        frame: EthernetFrame,
+    ) -> Result<(), LabError> {
+        match self.transmit(source, frame) {
+            Err(LabError::Dropped(_)) => Ok(()),
+            other => other,
+        }
+    }
+
     pub(crate) fn transmit_network_frame(
         &mut self,
         source: InterfaceRef,
         frame: EthernetFrame,
     ) -> Result<(), LabError> {
         let Some(vlan) = self.device(source.device)?.svi_vlan(source.interface) else {
-            return self.transmit(source, frame);
+            return self.transmit_protocol(source, frame);
         };
         if !self.device(source.device)?.protocol_up(source.interface) {
             self.devices
                 .get_mut(&source.device)
                 .unwrap()
-                .record_drop(source.interface)?;
+                .record_drop_reason(source.interface, DropReason::InterfaceDown)?;
             self.trace_frame(source, TraceAction::Drop(DropReason::InterfaceDown), &frame);
             return Err(DropReason::InterfaceDown.into());
         }
@@ -117,7 +135,7 @@ impl Lab {
                 self.device(port.device)?
                     .prepare_switch_egress(port.interface, vlan, frame.clone())
             {
-                self.transmit(port, frame)?;
+                self.transmit_protocol(port, frame)?;
             }
         }
         self.devices.get_mut(&source.device).unwrap().record_frame(
@@ -140,6 +158,8 @@ impl Lab {
                 generation,
                 interface,
                 frame,
+                source,
+                lost,
             } => {
                 let check = if !self
                     .links
@@ -147,10 +167,33 @@ impl Lab {
                     .is_some_and(|l| l.active && l.generation == generation)
                 {
                     Err(DropReason::LinkChanged)
+                } else if lost {
+                    Err(DropReason::SimulatedLoss)
                 } else {
                     self.device(interface.device)?
                         .check_frame(interface.interface, &frame, true)
                 };
+                if let Some(cable) = self.links.get_mut(&link) {
+                    let counters = if cable.endpoint_a == source {
+                        &mut cable.a_to_b.counters
+                    } else {
+                        &mut cable.b_to_a.counters
+                    };
+                    match check {
+                        Ok(()) => {
+                            counters.rx_packets = counters.rx_packets.saturating_add(1);
+                            counters.rx_bytes =
+                                counters.rx_bytes.saturating_add(frame.len() as u64);
+                        }
+                        Err(DropReason::SimulatedLoss) => {
+                            counters.loss_drops = counters.loss_drops.saturating_add(1)
+                        }
+                        Err(DropReason::LinkChanged) => {
+                            counters.changed_drops = counters.changed_drops.saturating_add(1)
+                        }
+                        _ => {}
+                    }
+                }
                 match check {
                     Ok(()) => {
                         self.devices
@@ -175,7 +218,7 @@ impl Lab {
                         self.devices
                             .get_mut(&interface.device)
                             .ok_or_else(|| LabError::UnknownDevice(interface.device.0.to_string()))?
-                            .record_drop(interface.interface)?;
+                            .record_drop_reason(interface.interface, reason)?;
                         self.trace_frame(interface, TraceAction::Drop(reason), &frame);
                         EventOutcome::FrameDropped { interface, reason }
                     }
@@ -310,7 +353,7 @@ impl Lab {
                 .device(device)?
                 .prepare_switch_egress(interface, vlan, frame)
             {
-                self.transmit(source, frame)?;
+                self.transmit_protocol(source, frame)?;
             }
         }
         let next = self
@@ -376,6 +419,8 @@ impl Lab {
         let connected = &self.ports;
         let device = self.devices.get_mut(&ingress.device).unwrap();
         if !device.stp_forwarding(ingress.interface, vlan) {
+            device.record_drop_reason(ingress.interface, DropReason::StpBlocking)?;
+            self.trace_frame(ingress, TraceAction::Drop(DropReason::StpBlocking), &frame);
             return Ok(());
         }
         device.learn_mac(vlan, frame.source, ingress.interface, now)?;
@@ -408,7 +453,7 @@ impl Lab {
                 self.device(port.device)?
                     .prepare_switch_egress(port.interface, vlan, frame.clone())
             {
-                self.transmit(port, frame)?;
+                self.transmit_protocol(port, frame)?;
             }
         }
         Ok(())

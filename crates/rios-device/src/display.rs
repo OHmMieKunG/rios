@@ -84,6 +84,9 @@ impl Device {
                 c.rx_packets, c.rx_bytes, c.tx_packets, c.tx_bytes, c.drops
             )
             .unwrap();
+            for (reason, count) in &c.drop_reasons {
+                writeln!(out, "    {count} drops: {reason}").unwrap();
+            }
         }
         out
     }

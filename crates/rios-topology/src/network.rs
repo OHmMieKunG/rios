@@ -294,7 +294,7 @@ impl Lab {
             self.devices
                 .get_mut(&source.device)
                 .unwrap()
-                .record_drop(source.interface)?;
+                .record_drop_reason(source.interface, DropReason::AccessList)?;
             self.trace_frame(source, TraceAction::Drop(DropReason::AccessList), &frame);
             return Ok(());
         }
@@ -413,7 +413,7 @@ impl Lab {
             self.devices
                 .get_mut(&interface.device)
                 .unwrap()
-                .record_drop(interface.interface)?;
+                .record_drop_reason(interface.interface, DropReason::AccessList)?;
             self.trace_frame(interface, TraceAction::Drop(DropReason::AccessList), frame);
             return Ok(());
         }

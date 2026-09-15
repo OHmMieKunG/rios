@@ -266,3 +266,25 @@ fn lab_shell_uses_unique_abbreviations_and_contextual_help() {
         assert!(text.contains(expected), "missing {expected}:\n{text}");
     }
 }
+
+#[test]
+fn lab_links_expose_transmission_policy_and_counters() {
+    let output = Command::new(env!("CARGO_BIN_EXE_rios"))
+        .args(["lab", "examples/two-routers.yaml"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn();
+    let mut child = output.unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"links\nexit\n")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("bandwidth unlimited"));
+    assert!(text.contains("queue 100 packets/direction"));
+    assert!(text.contains("A->B: queued 0, TX 0, RX 0"));
+}

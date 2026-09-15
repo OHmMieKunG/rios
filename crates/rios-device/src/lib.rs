@@ -87,6 +87,7 @@ impl std::fmt::Display for InterfaceMedia {
 /// Runtime traffic counters. Configuration changes do not reset them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InterfaceCounters {
+    pub drop_reasons: BTreeMap<DropReason, u64>,
     pub rx_packets: u64,
     pub tx_packets: u64,
     pub rx_bytes: u64,

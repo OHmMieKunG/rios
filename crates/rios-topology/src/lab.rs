@@ -8,6 +8,9 @@ use std::collections::BTreeMap;
 /// Single owner of a lab's devices, links, clock, and pending traffic.
 #[derive(Debug, Default)]
 pub struct Lab {
+    pub(crate) seed: u64,
+    pub(crate) rng: rios_simulator::SimulationRng,
+    next_link_id: u64,
     pub(crate) devices: BTreeMap<DeviceId, Device>,
     pub(crate) names: BTreeMap<String, DeviceId>,
     pub(crate) links: BTreeMap<LinkId, Link>,
@@ -32,6 +35,14 @@ pub(crate) struct PendingIpv4 {
     pub(crate) expires_at: SimTime,
 }
 impl Lab {
+    /// Construct a lab with a reproducible random stream for link impairments.
+    pub fn with_seed(seed: u64) -> Self {
+        Self {
+            seed,
+            rng: rios_simulator::SimulationRng(seed),
+            ..Self::default()
+        }
+    }
     /// Add a device with generated GigabitEthernet ports for interactive lab building.
     pub fn spawn_device(
         &mut self,
@@ -102,7 +113,7 @@ impl Lab {
 
     /// Render the current inventory and cables as a reusable YAML topology.
     pub fn render_yaml(&self) -> String {
-        let mut output = String::from("devices:\n");
+        let mut output = format!("seed: {}\ndevices:\n", self.seed);
         for (name, id) in self.device_names() {
             let device = self.devices.get(&id).expect("device name index is valid");
             let kind = match device.device_type() {
@@ -151,6 +162,16 @@ impl Lab {
                 yaml_quote(&self.endpoint_inventory_name(link.endpoint_a)),
                 yaml_quote(&self.endpoint_inventory_name(link.endpoint_b)),
                 link.delay_ms
+            ));
+            if let Some(rate) = link.config.bandwidth {
+                output.push_str(&format!("    bandwidth: {}bps\n", rate.bits_per_second()));
+            }
+            output.push_str(&format!(
+                "    jitter_ms: {}\n    loss_percent: {}.{:04}\n    queue_packets: {}\n",
+                link.config.jitter_us / 1000,
+                link.config.loss_ppm / 10_000,
+                link.config.loss_ppm % 10_000,
+                link.config.queue_packets
             ));
         }
         output
@@ -305,6 +326,27 @@ impl Lab {
         b: InterfaceRef,
         delay_ms: u64,
     ) -> Result<LinkId, LabError> {
+        let delay_us = delay_ms.checked_mul(1000).ok_or(ScheduleError::Overflow)?;
+        self.connect_configured(
+            a,
+            b,
+            rios_simulator::LinkConfig {
+                delay_us,
+                ..Default::default()
+            },
+        )
+    }
+
+    /// Attach a full-duplex cable with validated transmission policy.
+    pub fn connect_configured(
+        &mut self,
+        a: InterfaceRef,
+        b: InterfaceRef,
+        config: rios_simulator::LinkConfig,
+    ) -> Result<LinkId, LabError> {
+        config
+            .validate()
+            .map_err(|error| LabError::InvalidTopology(error.into()))?;
         if a == b {
             return Err(LabError::InvalidTopology(
                 "link endpoints must differ".into(),
@@ -334,9 +376,8 @@ impl Lab {
                 "incompatible port media: {media_a} and {media_b}"
             )));
         }
-        let id = LinkId(self.links.last_key_value().map_or(Ok(1), |(id, _)| {
-            id.0.checked_add(1).ok_or(LabError::Capacity)
-        })?);
+        let id = LinkId(self.next_link_id.checked_add(1).ok_or(LabError::Capacity)?);
+        self.next_link_id = id.0;
         self.links.insert(
             id,
             Link {
@@ -344,7 +385,10 @@ impl Lab {
                 endpoint_a: a,
                 endpoint_b: b,
                 state: LinkState::Up,
-                delay_ms,
+                delay_ms: config.delay_us / 1000,
+                config,
+                a_to_b: Default::default(),
+                b_to_a: Default::default(),
                 active: false,
                 generation: 0,
             },
@@ -381,6 +425,8 @@ impl Lab {
             if active != link.active {
                 link.generation = link.generation.checked_add(1).ok_or(LabError::Capacity)?;
                 link.active = active;
+                link.a_to_b.reset();
+                link.b_to_a.reset();
             }
             for endpoint in [link.endpoint_a, link.endpoint_b] {
                 self.devices

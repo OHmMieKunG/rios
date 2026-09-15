@@ -210,3 +210,19 @@ unsupported per-key restrictions fail startup instead of being ignored. SSH
 exec requests execute one User EXEC command through the shared device-session
 path, translate its result to process status 0 or 1, and close the channel. Tab
 completion, remote history, and a topology web frontend are deferred.
+
+## Link transmission model
+
+The canonical `SimTime` unit is now microseconds. CLI `run` and YAML `delay_ms`
+remain milliseconds; Rust callers can use `SimTime::from_millis` explicitly.
+A configured `bandwidth` adds integer, ceiling-rounded serialization of the
+encoded frame bytes (without preamble, IFG, or FCS). Omitted bandwidth preserves
+legacy instantaneous serialization. Each direction has its own bounded FIFO;
+`queue_packets` includes the frame currently serializing. Propagation does not
+occupy the transmitter. Jitter samples a symmetric interval around the configured
+delay, clamps negative propagation to zero, and preserves FIFO arrival order.
+Loss is sampled in integer millionths from a lab-owned seeded SplitMix64 stream.
+Drops consume serialization time. An outage resets queue reservations and
+invalidates outstanding traffic by generation. Removed link IDs are never reused.
+`links` displays transmission policy, queue occupancy, and directional counters;
+`show interfaces` displays reason-specific drop counters.

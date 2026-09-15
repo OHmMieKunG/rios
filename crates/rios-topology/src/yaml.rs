@@ -8,6 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Topology {
+    #[serde(default)]
+    seed: u64,
     devices: BTreeMap<String, DeviceDefinition>,
     #[serde(default)]
     links: Vec<LinkDefinition>,
@@ -49,6 +51,17 @@ struct LinkDefinition {
     endpoints: [String; 2],
     #[serde(default = "default_delay")]
     delay_ms: u64,
+    #[serde(default)]
+    bandwidth: Option<String>,
+    #[serde(default)]
+    jitter_ms: u64,
+    #[serde(default)]
+    loss_percent: f64,
+    #[serde(default = "default_queue")]
+    queue_packets: usize,
+}
+fn default_queue() -> usize {
+    100
 }
 fn default_delay() -> u64 {
     1
@@ -65,7 +78,7 @@ impl Topology {
                 "at least one device is required".into(),
             ));
         }
-        let mut lab = Lab::default();
+        let mut lab = Lab::with_seed(self.seed);
         for (index, (name, definition)) in self.devices.into_iter().enumerate() {
             let kind = match definition.kind {
                 DeviceKind::Router => DeviceType::Router,
@@ -108,7 +121,29 @@ impl Topology {
         for link in self.links {
             let a = lab.endpoint(&link.endpoints[0])?;
             let b = lab.endpoint(&link.endpoints[1])?;
-            lab.connect(a, b, link.delay_ms)?;
+            if !link.loss_percent.is_finite() || !(0.0..=100.0).contains(&link.loss_percent) {
+                return Err(LabError::InvalidTopology(
+                    "loss_percent must be 0..=100".into(),
+                ));
+            }
+            let config = rios_simulator::LinkConfig {
+                bandwidth: link
+                    .bandwidth
+                    .map(|value| value.parse())
+                    .transpose()
+                    .map_err(|error: &str| LabError::InvalidTopology(error.into()))?,
+                delay_us: link
+                    .delay_ms
+                    .checked_mul(1000)
+                    .ok_or(ScheduleError::Overflow)?,
+                jitter_us: link
+                    .jitter_ms
+                    .checked_mul(1000)
+                    .ok_or(ScheduleError::Overflow)?,
+                loss_ppm: (link.loss_percent * 10_000.0).round() as u32,
+                queue_packets: link.queue_packets,
+            };
+            lab.connect_configured(a, b, config)?;
         }
         Ok(lab)
     }

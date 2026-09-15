@@ -20,6 +20,9 @@ pub struct Link {
     pub endpoint_b: InterfaceRef,
     pub state: LinkState,
     pub delay_ms: u64,
+    pub config: rios_simulator::LinkConfig,
+    pub a_to_b: rios_simulator::DirectionalLinkRuntime,
+    pub b_to_a: rios_simulator::DirectionalLinkRuntime,
     pub(crate) active: bool,
     pub(crate) generation: u64,
 }
@@ -37,6 +40,8 @@ pub(crate) enum SimulationEvent {
         generation: u64,
         interface: InterfaceRef,
         frame: EthernetFrame,
+        source: InterfaceRef,
+        lost: bool,
     },
     LinkStateChanged {
         link: LinkId,
