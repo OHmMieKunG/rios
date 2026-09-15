@@ -5,6 +5,8 @@ mod capture;
 mod delivery;
 pub use capture::CaptureFilter;
 mod lab;
+mod qos;
+pub use qos::QosPortStatistics;
 mod network;
 mod yaml;
 pub use lab::Lab;
@@ -37,6 +39,10 @@ impl Link {
 /// Concrete internal events scheduled by the lab, with owned frame payloads.
 #[derive(Debug)]
 pub(crate) enum SimulationEvent {
+    QosTransmit {
+        source: InterfaceRef,
+        epoch: u64,
+    },
     BgpTimer {
         device: rios_simulator::DeviceId,
         generation: u64,

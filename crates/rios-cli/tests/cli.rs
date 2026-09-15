@@ -1410,3 +1410,114 @@ fn prefix_lists_route_maps_and_bgp_policy_replay_and_help() {
             && peer.default_originate.is_none()
     );
 }
+
+#[test]
+fn qos_commands_share_modes_help_no_do_and_structured_replay() {
+    let mut device = Device::standalone();
+    let mut session = CliSession {
+        mode: CliMode::GlobalConfiguration,
+    };
+    for input in [
+        "class-map match-any VOICE",
+        "match ip dscp ef af31 cs6",
+        "match ip prec 5",
+        "match access-g name VOICE-ACL",
+        "exit",
+        "policy-map WAN",
+        "class VOICE",
+        "priority 8 1000",
+        "exit",
+        "class class-default",
+        "bandwidth 20",
+        "police 80000 1000",
+        "shape av 8000 800",
+        "exit",
+        "exit",
+        "interface gi0/0",
+        "service-p out WAN",
+        "do sh policy-m int gi0/0",
+        "end",
+    ] {
+        run(&mut device, &mut session, input).unwrap();
+    }
+    let mut restored = Device::standalone();
+    load_configuration(&mut restored, &device.running_config().render()).unwrap();
+    assert_eq!(device.running_config(), restored.running_config());
+    let qos = &device.running_config().qos;
+    assert_eq!(
+        qos.classes.values().next().unwrap().dscp,
+        std::collections::BTreeSet::from([26, 46, 48])
+    );
+    assert_eq!(
+        qos.policies
+            .values()
+            .next()
+            .unwrap()
+            .classes
+            .last()
+            .unwrap()
+            .shape
+            .unwrap()
+            .burst_bytes,
+        Some(100)
+    );
+    assert!(matches!(
+        run(&mut device, &mut session, "sh policy-m int")
+            .unwrap()
+            .request,
+        Some(SimulationRequest::ShowPolicyInterface(None))
+    ));
+    for input in ["conf t", "policy-map WAN", "class VOICE"] {
+        run(&mut device, &mut session, input).unwrap();
+    }
+    for (input, expected) in [
+        ("priority ?", "<kbps>"),
+        ("priority 8 ?", "<burst-bytes>"),
+        ("shape average 8000 ?", "<burst-bits>"),
+        ("police ?", "<bits-per-second>"),
+    ] {
+        let ParsedInput::Help(help) = parse(input, session.mode).unwrap() else {
+            panic!("help expected")
+        };
+        assert!(help.contains(expected), "{input}: {help}");
+    }
+    for input in [
+        "bandwidth 0",
+        "priority 1000000001",
+        "shape average 8000 7",
+        "police 1 1073741825",
+    ] {
+        assert!(parse(input, session.mode).is_err());
+    }
+    let before = device.running_config().clone();
+    assert!(
+        run(&mut device, &mut session, "bandwidth 10").is_err(),
+        "priority and bandwidth are mutually exclusive"
+    );
+    assert_eq!(device.running_config(), &before);
+    for input in [
+        "no priority",
+        "exit",
+        "class class-default",
+        "no police",
+        "no shape average",
+        "no bandwidth",
+        "exit",
+        "no class VOICE",
+        "exit",
+        "interface gi0/0",
+        "no service-policy output WAN",
+        "exit",
+        "no policy-map WAN",
+        "class-map match-any VOICE",
+        "no match ip dscp",
+        "no match ip prec",
+        "no match access-group name VOICE-ACL",
+        "exit",
+        "no class-map VOICE",
+    ] {
+        run(&mut device, &mut session, input).unwrap();
+    }
+    assert!(device.running_config().qos.classes.is_empty());
+    assert!(device.running_config().qos.policies.is_empty());
+}

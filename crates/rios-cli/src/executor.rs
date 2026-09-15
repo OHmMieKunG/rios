@@ -1,3 +1,4 @@
+mod qos;
 use crate::*;
 use rios_config::AdminState;
 use rios_device::{Device, DeviceError};
@@ -45,7 +46,8 @@ fn edit_interfaces(
 fn executable_after_do(command: &Command) -> bool {
     matches!(
         command,
-        Command::ShowRunningConfig
+        Command::Qos(QosCommand::ShowInterface(_))
+            | Command::ShowRunningConfig
             | Command::ShowStartupConfig
             | Command::ShowInterfaces
             | Command::ShowInterface(_)
@@ -117,10 +119,14 @@ pub fn execute_at(
             | VlanConfiguration(_)
             | RouterConfiguration(_)
             | DhcpPoolConfiguration(_)
+            | QosClassConfiguration(_)
+            | QosPolicyConfiguration(_)
+            | QosPolicyClassConfiguration(..)
             | RouteMapConfiguration(..)
             | AccessListConfiguration(_, _)
     );
     let valid = match &command {
+        Command::Qos(command) => qos::valid(command, mode),
         Command::SetPrefixList { .. }
         | Command::RemovePrefixList { .. }
         | Command::EnterRouteMap { .. }
@@ -282,6 +288,7 @@ pub fn execute_at(
     }
     let mut result = Execution::default();
     match command {
+        Command::Qos(command) => return qos::execute(device, session, command),
         Command::EnterAccessList { name, kind } => {
             session.mode = AccessListConfiguration(device.ensure_acl(&name, kind)?, kind);
         }
@@ -838,6 +845,7 @@ pub fn execute_at(
         }
         Command::End => session.end_configuration(),
         Command::Exit => match mode {
+            QosPolicyClassConfiguration(id, _) => session.mode = QosPolicyConfiguration(id),
             UserExec | PrivilegedExec => {
                 result.close = true;
                 result.output = "Connection closed.\n".into();
@@ -849,6 +857,8 @@ pub fn execute_at(
             | VlanConfiguration(_)
             | RouterConfiguration(_)
             | DhcpPoolConfiguration(_)
+            | QosClassConfiguration(_)
+            | QosPolicyConfiguration(_)
             | RouteMapConfiguration(..)
             | AccessListConfiguration(_, _) => session.mode = GlobalConfiguration,
         },
@@ -881,6 +891,9 @@ pub fn load_configuration(device: &mut Device, text: &str) -> Result<(), CliErro
                 | CliMode::VlanConfiguration(_)
                 | CliMode::RouterConfiguration(_)
                 | CliMode::DhcpPoolConfiguration(_)
+                | CliMode::QosClassConfiguration(_)
+                | CliMode::QosPolicyConfiguration(_)
+                | CliMode::QosPolicyClassConfiguration(..)
                 | CliMode::RouteMapConfiguration(..)
                 | CliMode::AccessListConfiguration(_, _)
         ) {
@@ -897,6 +910,9 @@ pub fn load_configuration(device: &mut Device, text: &str) -> Result<(), CliErro
                         | CliMode::VlanConfiguration(_)
                         | CliMode::RouterConfiguration(_)
                         | CliMode::DhcpPoolConfiguration(_)
+                        | CliMode::QosClassConfiguration(_)
+                        | CliMode::QosPolicyConfiguration(_)
+                        | CliMode::QosPolicyClassConfiguration(..)
                         | CliMode::RouteMapConfiguration(..)
                         | CliMode::AccessListConfiguration(_, _)
                 ) {

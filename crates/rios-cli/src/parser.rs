@@ -4,6 +4,7 @@ mod dhcp;
 mod ipv6;
 mod nat;
 mod ospf;
+mod qos;
 mod route_policy;
 use crate::{
     tree::{Action, Node, tree},
@@ -207,6 +208,38 @@ fn parse_input(
                 .ok_or(ParseError::Incomplete)?,
         ));
     }
+    if matches!(
+        action,
+        Action::QosClassMap
+            | Action::NoQosClassMap
+            | Action::QosDscp
+            | Action::NoQosDscp
+            | Action::QosPrecedence
+            | Action::NoQosPrecedence
+            | Action::QosAcl
+            | Action::NoQosAcl
+            | Action::QosPolicyMap
+            | Action::NoQosPolicyMap
+            | Action::QosPolicyClass
+            | Action::NoQosPolicyClass
+            | Action::QosBandwidth
+            | Action::NoQosBandwidth
+            | Action::QosPriority
+            | Action::NoQosPriority
+            | Action::QosPolice
+            | Action::NoQosPolice
+            | Action::QosShape
+            | Action::NoQosShape
+            | Action::QosOutput
+            | Action::NoQosOutput
+            | Action::ShowQosInterface
+    ) {
+        return Ok(ParsedInput::Command(
+            qos::options(action, args)?
+                .command
+                .ok_or(ParseError::Incomplete)?,
+        ));
+    }
     let expected = match action {
         Action::Ipv6Address
         | Action::NoIpv6Address
@@ -298,6 +331,14 @@ fn parse_input(
     };
     use Action::*;
     let command = match action {
+        QosClassMap | NoQosClassMap | QosDscp | NoQosDscp | QosPrecedence | NoQosPrecedence
+        | QosAcl | NoQosAcl | QosPolicyMap | NoQosPolicyMap | QosPolicyClass | NoQosPolicyClass
+        | QosBandwidth | NoQosBandwidth | QosPriority | NoQosPriority | QosPolice | NoQosPolice
+        | QosShape | NoQosShape | QosOutput | NoQosOutput | ShowQosInterface => {
+            qos::options(action, args)?
+                .command
+                .ok_or(ParseError::Incomplete)?
+        }
         PrefixList | NoPrefixList | RouteMap | NoRouteMap | RouteMapMatch | NoRouteMapMatch
         | RouteMapLocalPref | NoRouteMapLocalPref | RouteMapMetric | NoRouteMapMetric
         | RouteMapPrepend | NoRouteMapPrepend => route_policy::options(action, args)?
@@ -445,7 +486,8 @@ fn parse_input(
             };
             if !matches!(
                 command,
-                Command::ShowRunningConfig
+                Command::Qos(QosCommand::ShowInterface(_))
+                    | Command::ShowRunningConfig
                     | Command::ShowStartupConfig
                     | Command::ShowInterfaces
                     | Command::ShowInterface(_)
@@ -1022,6 +1064,34 @@ pub fn suggestions(
     }
     if let Some(action) = node.action {
         let args = &complete[used..];
+        if matches!(
+            action,
+            Action::QosClassMap
+                | Action::NoQosClassMap
+                | Action::QosDscp
+                | Action::NoQosDscp
+                | Action::QosPrecedence
+                | Action::NoQosPrecedence
+                | Action::QosAcl
+                | Action::NoQosAcl
+                | Action::QosPolicyMap
+                | Action::NoQosPolicyMap
+                | Action::QosPolicyClass
+                | Action::NoQosPolicyClass
+                | Action::QosBandwidth
+                | Action::NoQosBandwidth
+                | Action::QosPriority
+                | Action::NoQosPriority
+                | Action::QosPolice
+                | Action::NoQosPolice
+                | Action::QosShape
+                | Action::NoQosShape
+                | Action::QosOutput
+                | Action::NoQosOutput
+                | Action::ShowQosInterface
+        ) {
+            return qos::suggest(action, args, partial, start);
+        }
         if matches!(
             action,
             Action::PrefixList

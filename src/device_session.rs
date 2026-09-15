@@ -35,6 +35,9 @@ pub fn process(
                     output.push_str(&result.output);
                     if let Some(request) = result.request.take() {
                         let ping = match request {
+                            SimulationRequest::ShowPolicyInterface(interface) => {
+                                lab.show_policy_map_port(id, interface)
+                            }
                             SimulationRequest::Ping(destination) => {
                                 lab.ping(id, destination).map(|ping| ping.render())
                             }

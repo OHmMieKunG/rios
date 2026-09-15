@@ -4,6 +4,33 @@ use rios_switching::{STP_HELLO_MS, STP_MULTICAST, StpBpdu};
 impl Lab {
     /// Move a frame into a virtual cable. Delivery occurs only when events are stepped.
     pub fn transmit(&mut self, source: InterfaceRef, frame: EthernetFrame) -> Result<(), LabError> {
+        let rate = self
+            .ports
+            .get(&source)
+            .and_then(|id| self.links.get(id))
+            .and_then(|link| link.config.bandwidth)
+            .map(|b| b.bits_per_second());
+        if let Some(profile) = self
+            .device(source.device)?
+            .qos_profile(source.interface, rate)
+        {
+            if let Err(reason) =
+                self.device(source.device)?
+                    .check_frame(source.interface, &frame, false)
+            {
+                self.qos_drop(source, &frame, reason)?;
+                return Err(reason.into());
+            }
+            self.enqueue_qos(source, profile, frame)
+        } else {
+            self.transmit_on_link(source, frame)
+        }
+    }
+    pub(crate) fn transmit_on_link(
+        &mut self,
+        source: InterfaceRef,
+        frame: EthernetFrame,
+    ) -> Result<(), LabError> {
         self.device(source.device)?
             .interfaces()
             .get(&source.interface)
@@ -208,6 +235,10 @@ impl Lab {
             return Ok(None);
         };
         let outcome = match scheduled.event {
+            SimulationEvent::QosTransmit { source, epoch } => {
+                self.qos_timer(source, epoch)?;
+                return Ok(None);
+            }
             SimulationEvent::LacpTick { device } => {
                 self.lacp_timer(device)?;
                 return Ok(None);

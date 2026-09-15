@@ -2,8 +2,12 @@
 #![forbid(unsafe_code)]
 mod acl;
 mod bgp;
+mod qos;
 mod route_policy;
 pub use bgp::{BgpConfig, BgpDefaultRoute, BgpNeighborConfig, BgpPolicy};
+pub use qos::{
+    QosClassId, QosClassMap, QosConfig, QosPolicyClass, QosPolicyId, QosPolicyMap, QosRate,
+};
 pub use route_policy::{PrefixListEntry, RouteMap, RouteMapEntry, RouteMapId, RoutingPolicyConfig};
 mod ipv6;
 pub use ipv6::{Ipv6InterfacePolicy, Ipv6StaticRoute, OspfV3Binding, OspfV3Config};
@@ -34,6 +38,8 @@ pub enum AdminState {
 /// Authoritative configuration for one interface.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InterfaceConfig {
+    #[serde(default)]
+    pub service_policy_output: Option<QosPolicyId>,
     #[serde(default)]
     pub ipv6: Ipv6InterfacePolicy,
     #[serde(default)]
@@ -252,6 +258,8 @@ fn default_lease_seconds() -> u32 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunningConfig {
     #[serde(default)]
+    pub qos: QosConfig,
+    #[serde(default)]
     pub routing_policy: RoutingPolicyConfig,
     #[serde(default)]
     pub bgp: Option<BgpConfig>,
@@ -390,6 +398,7 @@ impl RunningConfig {
             }
             out.push_str("!\n");
         }
+        out.push_str(&self.qos.render());
         let mut interfaces: Vec<_> = self.interfaces.values().collect();
         interfaces.sort_by_key(|config| config.port_channel.is_some());
         for config in interfaces {
@@ -402,6 +411,12 @@ impl RunningConfig {
                     if encapsulation.native { " native" } else { "" }
                 )
                 .unwrap();
+            }
+            if let Some(policy) = config
+                .service_policy_output
+                .and_then(|id| self.qos.policies.get(&id))
+            {
+                let _ = writeln!(out, " service-policy output {}", policy.name);
             }
             if !config.description.is_empty() {
                 writeln!(out, " description {}", config.description).unwrap();

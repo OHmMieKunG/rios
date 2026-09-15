@@ -2,8 +2,10 @@
 #![forbid(unsafe_code)]
 mod acl;
 mod bgp;
+mod qos;
 mod route_policy;
 pub use bgp::BgpNeighborInfo;
+pub use qos::{QosProfile, QosProfileClass};
 mod ospfv3;
 pub use ospfv3::{OspfV3NeighborInfo, OspfV3Transmission};
 mod ipv6;
@@ -183,6 +185,8 @@ pub enum DeviceError {
     InvalidBgpConfig,
     #[error("invalid routing policy name, sequence, rule, or capacity")]
     InvalidRoutingPolicy,
+    #[error("invalid QoS policy, class, rate, interface, or capacity")]
+    InvalidQosConfig,
     #[error("invalid spanning-tree priority, cost, or port policy")]
     InvalidSpanningTree,
     #[error("invalid EtherChannel member or incompatible port configuration")]
@@ -300,6 +304,7 @@ impl Device {
             running_config: RunningConfig {
                 bgp: None,
                 routing_policy: Default::default(),
+                qos: Default::default(),
                 ospfv3: None,
                 ipv6_unicast_routing: false,
                 ipv6_static_routes: BTreeSet::new(),
@@ -444,6 +449,7 @@ impl Device {
         self.running_config.interfaces.insert(
             id,
             InterfaceConfig {
+                service_policy_output: None,
                 ipv6: rios_config::Ipv6InterfacePolicy::default(),
                 ospf: rios_config::OspfInterfaceConfig::default(),
                 spanning_tree: rios_config::StpPortConfig::default(),

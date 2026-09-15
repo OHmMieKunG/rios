@@ -592,3 +592,50 @@ Route-map matches currently cover IPv4 prefix lists only; community, AS-path
 regular expressions, policy-based packet forwarding and route-map `continue`
 are not claimed. Public behavior reference:
 [Cisco BGP command reference](https://www.cisco.com/c/en/us/td/docs/ios-xml/ios/iproute_bgp/command/irg-cr-book/bgp-m1.html).
+
+
+## Output QoS
+
+Structured class maps match IPv4 DSCP, IP precedence and existing IPv4 ACLs;
+DSCP matching also reads IPv6 traffic class. Match-any combines criteria with OR,
+match-all with AND. Values within a DSCP/precedence criterion use OR. ACL matching
+is observational and does not increment forwarding ACL counters. IPv4 forwarding
+preserves both DSCP and ECN bits.
+
+Ordered policy classes feed bounded physical-interface output queues. Priority
+traffic precedes eligible ordinary traffic without preempting a frame already
+serializing. Its token bucket limits excess during congestion. `police` applies
+a single-bucket drop policer even without congestion; `shape average` delays real
+frames until tokens become available. Ordinary classes use weighted byte finish
+times; configured bandwidth weights and equal shares of remaining link bandwidth
+for unspecified classes determine service under contention. Oversubscribed
+weights remain relative shares, not impossible minimum-throughput guarantees.
+
+`bandwidth` and `priority` use kilobits/second; `police` and `shape average` use
+bits/second. Explicit priority/police bursts use bytes; shape bursts use bits
+and must be whole bytes. Omitted bursts allow 100 ms of traffic, at least one
+MTU-sized Ethernet frame. A frame larger than an explicit shaping burst drops
+with a separate reason. Rates, burst sizes and inventories are validated.
+
+Queues count waiting and serializing packets against the link queue limit.
+Virtual-time wakeups preserve stable event order, and previously scheduled
+shaping deadlines are reused when other classes temporarily become eligible.
+VLAN/STP state is rechecked on departure. Link changes and scheduling-policy
+edits discard waiting frames with explicit reasons; stale events cannot transmit
+them. Packet capture observes the same actual wire transmissions and does not
+change scheduling. CLI class `dequeued` counts queue departures; actual wire
+TX and downstream drops remain in interface/link counters.
+
+Limits: 256 class maps/policies per device, 64 classes per policy including
+class-default. Attachments currently target physical Ethernet output interfaces.
+Input policies, logical-interface policies, hierarchical shaping, marking, WRED
+and ECN marking are not implemented. Existing unlimited-bandwidth links preserve
+legacy instantaneous serialization; configure link bandwidth for congestion labs.
+
+The shared CLI supports class-map/policy-map modes, no/do, abbreviations, help,
+configuration replay and `show policy-map interface [interface]`. Exercise actual
+ICMP policing (three replies, two drops) with:
+
+```sh
+cargo run -- lab examples/two-routers.yaml < examples/qos-session.txt
+```

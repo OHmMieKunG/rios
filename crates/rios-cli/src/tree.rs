@@ -1,10 +1,34 @@
 mod bgp;
 mod ospfv3;
+mod qos;
 mod route_policy;
 use crate::CliMode;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Action {
+    QosClassMap,
+    NoQosClassMap,
+    QosDscp,
+    NoQosDscp,
+    QosPrecedence,
+    NoQosPrecedence,
+    QosAcl,
+    NoQosAcl,
+    QosPolicyMap,
+    NoQosPolicyMap,
+    QosPolicyClass,
+    NoQosPolicyClass,
+    QosBandwidth,
+    NoQosBandwidth,
+    QosPriority,
+    NoQosPriority,
+    QosPolice,
+    NoQosPolice,
+    QosShape,
+    NoQosShape,
+    QosOutput,
+    NoQosOutput,
+    ShowQosInterface,
     PrefixList,
     NoPrefixList,
     RouteMap,
@@ -502,6 +526,9 @@ pub(crate) fn tree(mode: CliMode) -> Node {
         | CliMode::RouterConfiguration(_)
         | CliMode::DhcpPoolConfiguration(_)
         | CliMode::RouteMapConfiguration(..)
+        | CliMode::QosClassConfiguration(_)
+        | CliMode::QosPolicyConfiguration(_)
+        | CliMode::QosPolicyClassConfiguration(..)
         | CliMode::AccessListConfiguration(_, _) => {
             root.add(&[("end", "Return to privileged EXEC")], End);
             root.add(&[("do", "Execute an EXEC command")], Do);
@@ -1107,5 +1134,6 @@ pub(crate) fn tree(mode: CliMode) -> Node {
     ospfv3::add(&mut root, mode);
     bgp::add(&mut root, mode);
     route_policy::add(&mut root, mode);
+    qos::add(&mut root, mode);
     root
 }

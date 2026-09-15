@@ -321,3 +321,34 @@ fn capture_commands_create_and_close_pcapng() {
     );
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn qos_policy_cli_changes_actual_ping_delivery() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rios"))
+        .args(["lab", "examples/two-routers.yaml"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(include_bytes!("../examples/qos-session.txt"))
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(!text.contains("% Invalid"), "{text}");
+    for expected in [
+        "Success rate is 60 percent (3/5)",
+        "Service-policy output: WAN",
+        "5 packets, 370 bytes; 3 dequeued, 0 queued",
+        "Drops: queue 0, police 2",
+        "2 drops: QoS policer exceeded",
+        "police 800 100",
+    ] {
+        assert!(text.contains(expected), "missing {expected}:\n{text}");
+    }
+}

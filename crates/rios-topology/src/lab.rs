@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 /// Single owner of a lab's devices, links, clock, and pending traffic.
 #[derive(Debug, Default)]
 pub struct Lab {
+    pub(crate) qos_queues: BTreeMap<InterfaceRef, crate::qos::QosPortRuntime>,
+    pub(crate) qos_epoch: u64,
     pub(crate) bgp_generations: BTreeMap<DeviceId, u64>,
     pub(crate) ipv6_generations: BTreeMap<DeviceId, u64>,
     pub(crate) pending_ipv6: Vec<crate::network::ipv6::PendingIpv6>,
@@ -457,6 +459,7 @@ impl Lab {
         for device in self.devices.values_mut() {
             device.refresh_svi_states();
         }
+        self.refresh_qos()?;
         Ok(())
     }
     pub(crate) fn schedule_ospf_now(&mut self, device: DeviceId) -> Result<(), LabError> {

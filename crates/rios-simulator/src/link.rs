@@ -107,6 +107,11 @@ pub enum Admission {
     Scheduled { arrival: SimTime, lost: bool },
 }
 impl DirectionalLinkRuntime {
+    /// First time a new frame can begin serialization, including existing FIFO reservations.
+    pub fn available_at(&self, now: SimTime) -> SimTime {
+        self.finishes.back().copied().unwrap_or(now).max(now)
+    }
+
     /// Number of frames still serializing or waiting at the specified time.
     pub fn queued(&self, now: SimTime) -> usize {
         self.finishes.iter().filter(|finish| **finish > now).count()

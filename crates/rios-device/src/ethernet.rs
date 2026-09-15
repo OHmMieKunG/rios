@@ -17,6 +17,16 @@ pub struct MacEntry {
 /// Observable reasons a virtual interface discards a frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, thiserror::Error)]
 pub enum DropReason {
+    #[error("QoS policer exceeded")]
+    QosPoliced,
+    #[error("QoS priority rate exceeded during congestion")]
+    QosPriorityExceeded,
+    #[error("frame exceeds QoS shaper burst")]
+    QosBurstExceeded,
+    #[error("QoS policy changed while frame was queued")]
+    QosPolicyChanged,
+    #[error("VLAN no longer permitted on egress")]
+    VlanFiltered,
     #[error("malformed network packet")]
     MalformedPacket,
     #[error("neighbor resolution failed")]

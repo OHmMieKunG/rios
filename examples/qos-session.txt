@@ -1,0 +1,38 @@
+connect R1
+enable
+configure terminal
+interface gi0/0
+ip address 10.0.0.1 255.255.255.0
+no shutdown
+exit
+ip access-list extended PING
+permit icmp any any
+exit
+class-map match-all PING
+match access-group name PING
+exit
+policy-map WAN
+class PING
+police 800 100
+exit
+exit
+interface gi0/0
+service-policy output WAN
+end
+exit
+connect R2
+enable
+configure terminal
+interface gi0/0
+ip address 10.0.0.2 255.255.255.0
+no shutdown
+end
+exit
+connect R1
+enable
+ping 10.0.0.2
+show policy-map interface gi0/0
+show interfaces gi0/0
+show running-config
+exit
+exit

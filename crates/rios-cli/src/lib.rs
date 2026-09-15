@@ -2,9 +2,11 @@
 #![forbid(unsafe_code)]
 mod executor;
 mod parser;
+mod qos;
 mod tree;
 pub use executor::{CliError, Execution, execute, execute_at, load_configuration};
 pub use parser::{ParseError, ParsedInput, Suggestion, parse, suggestions};
+pub use qos::QosCommand;
 use rios_config::{
     AccessListAction, AccessListDirection, AccessListId, DhcpPoolId, NatRole, OspfNetworkConfig,
     StandardAccessListEntry, SwitchportMode, VlanId,
@@ -75,6 +77,9 @@ pub enum CliMode {
     DhcpPoolConfiguration(DhcpPoolId),
     AccessListConfiguration(rios_config::AclId, rios_config::AclKind),
     RouteMapConfiguration(rios_config::RouteMapId, u32),
+    QosClassConfiguration(rios_config::QosClassId),
+    QosPolicyConfiguration(rios_config::QosPolicyId),
+    QosPolicyClassConfiguration(rios_config::QosPolicyId, Option<rios_config::QosClassId>),
 }
 /// Independent CLI session. Multiple sessions may reference the same device.
 #[derive(Debug, Clone, Default)]
@@ -94,6 +99,9 @@ impl CliSession {
             CliMode::VlanConfiguration(_) => "(config-vlan)#",
             CliMode::RouterConfiguration(_) => "(config-router)#",
             CliMode::DhcpPoolConfiguration(_) => "(dhcp-config)#",
+            CliMode::QosClassConfiguration(_) => "(config-cmap)#",
+            CliMode::QosPolicyConfiguration(_) => "(config-pmap)#",
+            CliMode::QosPolicyClassConfiguration(..) => "(config-pmap-c)#",
             CliMode::RouteMapConfiguration(..) => "(config-route-map)#",
             CliMode::AccessListConfiguration(_, kind) => {
                 if kind == rios_config::AclKind::Standard {
@@ -118,6 +126,9 @@ impl CliSession {
                 | CliMode::DhcpPoolConfiguration(_)
                 | CliMode::AccessListConfiguration(_, _)
                 | CliMode::RouteMapConfiguration(..)
+                | CliMode::QosClassConfiguration(_)
+                | CliMode::QosPolicyConfiguration(_)
+                | CliMode::QosPolicyClassConfiguration(..)
         ) {
             self.mode = CliMode::PrivilegedExec;
         }
@@ -151,6 +162,7 @@ pub enum DhcpPoolOption {
 /// Validated syntax, independent of state mutation and terminal I/O.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
+    Qos(QosCommand),
     SetPrefixList {
         name: String,
         sequence: Option<u32>,
@@ -357,6 +369,7 @@ pub enum Command {
 /// Work that requires the owning simulation lab after device-local execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SimulationRequest {
+    ShowPolicyInterface(Option<InterfaceId>),
     PingIpv6 {
         destination: std::net::Ipv6Addr,
         interface: Option<InterfaceId>,
