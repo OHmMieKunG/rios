@@ -69,7 +69,7 @@ impl Device {
     ) -> Option<MacEntry> {
         let key = (vlan, address);
         let entry = self.mac_table.get(&key).copied()?;
-        if now.0.saturating_sub(entry.learned_at.0) >= MAC_LIFETIME_MS {
+        if now.0.saturating_sub(entry.learned_at.0) >= MAC_LIFETIME_MS * 1000 {
             self.mac_table.remove(&key);
             None
         } else {
@@ -80,7 +80,7 @@ impl Device {
     /// Render non-expired dynamic switch forwarding entries.
     pub fn show_mac_address_table(&mut self, now: SimTime) -> String {
         self.mac_table
-            .retain(|_, entry| now.0.saturating_sub(entry.learned_at.0) < MAC_LIFETIME_MS);
+            .retain(|_, entry| now.0.saturating_sub(entry.learned_at.0) < MAC_LIFETIME_MS * 1000);
         let mut output = String::from(
             "          Mac Address Table\n-------------------------------------------\n\nVlan    Mac Address       Type        Ports\n----    -----------       --------    -----\n",
         );

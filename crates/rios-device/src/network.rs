@@ -156,7 +156,7 @@ impl Device {
     /// Resolve a non-expired ARP mapping, lazily aging stale entries.
     pub fn arp_lookup(&mut self, address: Ipv4Addr, now: SimTime) -> Option<ArpEntry> {
         let entry = self.arp_cache.get(&address).copied()?;
-        if now.0.saturating_sub(entry.learned_at.0) >= ARP_LIFETIME_MS {
+        if now.0.saturating_sub(entry.learned_at.0) >= ARP_LIFETIME_MS * 1000 {
             self.arp_cache.remove(&address);
             None
         } else {
@@ -167,11 +167,11 @@ impl Device {
     /// Render non-expired dynamic ARP entries at virtual time `now`.
     pub fn show_arp(&mut self, now: SimTime) -> String {
         self.arp_cache
-            .retain(|_, entry| now.0.saturating_sub(entry.learned_at.0) < ARP_LIFETIME_MS);
+            .retain(|_, entry| now.0.saturating_sub(entry.learned_at.0) < ARP_LIFETIME_MS * 1000);
         let mut output =
             String::from("Protocol  Address          Age  Hardware Addr     Interface\n");
         for entry in self.arp_cache.values() {
-            let age = now.0.saturating_sub(entry.learned_at.0) / 60_000;
+            let age = now.0.saturating_sub(entry.learned_at.0) / 60_000_000;
             let name = &self.running_config.interfaces[&entry.interface].name;
             writeln!(
                 output,
@@ -251,12 +251,24 @@ mod tests {
         );
         let mac = MacAddress([2, 0, 0, 0, 0, 2]);
         device
-            .learn_arp(Ipv4Addr::new(10, 0, 0, 2), mac, id, SimTime(10))
+            .learn_arp(
+                Ipv4Addr::new(10, 0, 0, 2),
+                mac,
+                id,
+                SimTime::from_millis(10),
+            )
             .unwrap();
-        assert!(device.show_arp(SimTime(60_010)).contains("10.0.0.2"));
         assert!(
             device
-                .arp_lookup(Ipv4Addr::new(10, 0, 0, 2), SimTime(ARP_LIFETIME_MS + 10))
+                .show_arp(SimTime::from_millis(60_010))
+                .contains("10.0.0.2")
+        );
+        assert!(
+            device
+                .arp_lookup(
+                    Ipv4Addr::new(10, 0, 0, 2),
+                    SimTime::from_millis(ARP_LIFETIME_MS + 10)
+                )
                 .is_none()
         );
     }

@@ -219,7 +219,7 @@ impl Device {
             server_id,
             lease_time_seconds: (DHCP_LEASE_MS / 1000) as u32,
             pool: pool_id,
-            expires_at: SimTime(now.0.saturating_add(DHCP_OFFER_MS)),
+            expires_at: SimTime(now.0.saturating_add(DHCP_OFFER_MS * 1000)),
         };
         self.dhcp_offers.insert(client_mac, offer);
         Some(offer)
@@ -238,7 +238,7 @@ impl Device {
         if offer.address != address || offer.server_id != server_id {
             return None;
         }
-        offer.expires_at = SimTime(now.0.saturating_add(DHCP_LEASE_MS));
+        offer.expires_at = SimTime(now.0.saturating_add(DHCP_LEASE_MS * 1000));
         let pool_name = self
             .running_config
             .dhcp_pools
@@ -303,7 +303,9 @@ impl Device {
             writeln!(
                 output,
                 "{:<16} {:<27} {}",
-                binding.address, binding.client_mac, binding.expires_at.0
+                binding.address,
+                binding.client_mac,
+                binding.expires_at.as_millis()
             )
             .unwrap();
         }

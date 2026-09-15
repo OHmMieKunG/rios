@@ -211,7 +211,7 @@ impl App {
     }
     pub fn run_until(&mut self, millis: u64) -> Result<(), rios_topology::LabError> {
         // Discard consumed Phase 2 outcomes; trace records retain packet-path metadata when enabled.
-        let outcomes = self.lab.run_until(SimTime(millis))?;
+        let outcomes = self.lab.run_until(SimTime::from_millis(millis))?;
         println!(
             "Simulated time: {} ({} events processed)",
             self.lab.now(),

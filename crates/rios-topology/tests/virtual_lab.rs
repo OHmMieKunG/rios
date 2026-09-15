@@ -72,9 +72,9 @@ fn virtual_delivery_moves_payload_and_accounts_exactly_once() {
     let packet = frame(&lab, a, b);
     let pointer = packet.payload.as_ptr();
     lab.transmit(a, packet).unwrap();
-    assert_eq!(lab.now(), SimTime(0));
+    assert_eq!(lab.now(), SimTime::from_millis(0));
     assert_eq!(lab.pending_events(), 1);
-    assert!(lab.run_until(SimTime(0)).unwrap().is_empty());
+    assert!(lab.run_until(SimTime::from_millis(0)).unwrap().is_empty());
     assert_eq!(
         lab.device(b.device).unwrap().interfaces()[&b.interface]
             .counters
@@ -87,7 +87,7 @@ fn virtual_delivery_moves_payload_and_accounts_exactly_once() {
     assert_eq!(interface, b);
     assert_eq!(frame.payload.as_ptr(), pointer);
     assert_eq!(frame.payload, [1, 2, 3, 4]);
-    assert_eq!(lab.now(), SimTime(1));
+    assert_eq!(lab.now(), SimTime::from_millis(1));
     assert!(lab.step().unwrap().is_none());
     let tx = &lab.device(a.device).unwrap().interfaces()[&a.interface].counters;
     let rx = &lab.device(b.device).unwrap().interfaces()[&b.interface].counters;
@@ -97,11 +97,11 @@ fn virtual_delivery_moves_payload_and_accounts_exactly_once() {
     assert_eq!(trace.len(), 2);
     assert_eq!(
         (trace[0].time, trace[0].action),
-        (SimTime(0), TraceAction::Tx)
+        (SimTime::from_millis(0), TraceAction::Tx)
     );
     assert_eq!(
         (trace[1].time, trace[1].action),
-        (SimTime(1), TraceAction::Rx)
+        (SimTime::from_millis(1), TraceAction::Rx)
     );
     assert!(lab.take_trace().is_empty());
 }
@@ -112,11 +112,11 @@ fn bidirectional_delivery_and_repeated_runs_are_deterministic() {
         lab.set_tracing(true);
         lab.transmit(a, frame(&lab, a, b)).unwrap();
         lab.transmit(b, frame(&lab, b, a)).unwrap();
-        let outcomes = lab.run_until(SimTime(10)).unwrap();
+        let outcomes = lab.run_until(SimTime::from_millis(10)).unwrap();
         assert_eq!(outcomes.len(), 2);
         assert!(matches!(outcomes[0],EventOutcome::FrameReceived {interface,..} if interface == b));
         assert!(matches!(outcomes[1],EventOutcome::FrameReceived {interface,..} if interface == a));
-        assert_eq!(lab.now(), SimTime(10));
+        assert_eq!(lab.now(), SimTime::from_millis(10));
         lab.take_trace()
     }
     assert_eq!(run(), run());
@@ -176,15 +176,15 @@ fn same_time_link_events_obey_insertion_order_and_timers_use_virtual_time() {
     for outage_first in [true, false] {
         let (mut lab, a, b) = setup();
         if outage_first {
-            lab.schedule_link_state(LinkId(1), LinkState::Down, SimTime(1))
+            lab.schedule_link_state(LinkId(1), LinkState::Down, SimTime::from_millis(1))
                 .unwrap();
         }
         lab.transmit(a, frame(&lab, a, b)).unwrap();
         if !outage_first {
-            lab.schedule_link_state(LinkId(1), LinkState::Down, SimTime(1))
+            lab.schedule_link_state(LinkId(1), LinkState::Down, SimTime::from_millis(1))
                 .unwrap();
         }
-        let outcomes = lab.run_until(SimTime(1)).unwrap();
+        let outcomes = lab.run_until(SimTime::from_millis(1)).unwrap();
         assert_eq!(
             outcomes
                 .iter()
@@ -196,7 +196,7 @@ fn same_time_link_events_obey_insertion_order_and_timers_use_virtual_time() {
             lab.step().unwrap(),
             Some(EventOutcome::TimerExpired { timer: TimerId(7) })
         );
-        assert_eq!(lab.now(), SimTime(5001));
+        assert_eq!(lab.now(), SimTime::from_millis(5001));
     }
 }
 #[test]
@@ -263,7 +263,7 @@ fn switch_learns_floods_forwards_and_ages_in_virtual_time() {
     }
 
     lab.transmit(h1, frame(&lab, h1, h2)).unwrap();
-    let flooded = lab.run_until(SimTime(2)).unwrap();
+    let flooded = lab.run_until(SimTime::from_millis(2)).unwrap();
     assert_eq!(flooded.len(), 3);
     assert!(flooded.iter().any(
         |event| matches!(event, EventOutcome::FrameReceived { interface, .. } if *interface == h2)
@@ -277,7 +277,7 @@ fn switch_learns_floods_forwards_and_ages_in_virtual_time() {
     )));
 
     lab.transmit(h2, frame(&lab, h2, h1)).unwrap();
-    let learned = lab.run_until(SimTime(4)).unwrap();
+    let learned = lab.run_until(SimTime::from_millis(4)).unwrap();
     assert_eq!(learned.len(), 2);
     assert!(learned.iter().any(
         |event| matches!(event, EventOutcome::FrameReceived { interface, .. } if *interface == h1)
@@ -286,7 +286,7 @@ fn switch_learns_floods_forwards_and_ages_in_virtual_time() {
     let mut broadcast = frame(&lab, h1, h2);
     broadcast.destination = MacAddress::BROADCAST;
     lab.transmit(h1, broadcast).unwrap();
-    let broadcast = lab.run_until(SimTime(6)).unwrap();
+    let broadcast = lab.run_until(SimTime::from_millis(6)).unwrap();
     assert!(broadcast.iter().any(
         |event| matches!(event, EventOutcome::FrameReceived { interface, .. } if *interface == h2)
     ));
@@ -294,9 +294,9 @@ fn switch_learns_floods_forwards_and_ages_in_virtual_time() {
         |event| matches!(event, EventOutcome::FrameReceived { interface, .. } if *interface == h3)
     ));
 
-    lab.run_until(SimTime(300_005)).unwrap();
+    lab.run_until(SimTime::from_millis(300_005)).unwrap();
     lab.transmit(h2, frame(&lab, h2, h1)).unwrap();
-    let aged = lab.run_until(SimTime(300_007)).unwrap();
+    let aged = lab.run_until(SimTime::from_millis(300_007)).unwrap();
     assert!(aged.iter().any(|event| matches!(
         event,
         EventOutcome::FrameDropped {
@@ -364,7 +364,7 @@ fn vlans_isolate_access_ports_and_trunks_carry_tags() {
     let mut vlan10_broadcast = frame(&lab, h10a, h10b);
     vlan10_broadcast.destination = MacAddress::BROADCAST;
     lab.transmit(h10a, vlan10_broadcast).unwrap();
-    let outcomes = lab.run_until(SimTime(3)).unwrap();
+    let outcomes = lab.run_until(SimTime::from_millis(3)).unwrap();
     assert!(outcomes.iter().any(|event| matches!(event,
         EventOutcome::FrameReceived { interface, frame }
             if *interface == sw2_trunk
@@ -382,7 +382,7 @@ fn vlans_isolate_access_ports_and_trunks_carry_tags() {
     let mut vlan20_broadcast = frame(&lab, h20a, h20b);
     vlan20_broadcast.destination = MacAddress::BROADCAST;
     lab.transmit(h20a, vlan20_broadcast).unwrap();
-    let outcomes = lab.run_until(SimTime(6)).unwrap();
+    let outcomes = lab.run_until(SimTime::from_millis(6)).unwrap();
     assert!(outcomes.iter().any(|event| matches!(event,
         EventOutcome::FrameReceived { interface, frame }
             if *interface == sw2_trunk && frame.ethertype == EtherType::Dot1Q
@@ -477,7 +477,7 @@ fn ospf_forms_neighbors_installs_routes_and_expires_them() {
         })
         .unwrap();
     }
-    lab.run_until(SimTime(20_010)).unwrap();
+    lab.run_until(SimTime::from_millis(20_010)).unwrap();
     assert!(
         lab.device(r1)
             .unwrap()
@@ -502,7 +502,7 @@ fn ospf_forms_neighbors_installs_routes_and_expires_them() {
     );
 
     lab.set_link_state(LinkId(1), LinkState::Down).unwrap();
-    lab.run_until(SimTime(61_000)).unwrap();
+    lab.run_until(SimTime::from_millis(61_000)).unwrap();
     assert!(
         !lab.device(r1)
             .unwrap()
@@ -560,7 +560,7 @@ fn spanning_tree_blocks_a_vlan_loop_and_prevents_duplicate_delivery() {
     for endpoint in endpoints {
         enable(&mut lab, endpoint, AdminState::Up);
     }
-    lab.run_until(SimTime(6_000)).unwrap();
+    lab.run_until(SimTime::from_millis(6_000)).unwrap();
 
     let now = lab.now();
     let states = ["SW1", "SW2", "SW3"]
@@ -577,7 +577,7 @@ fn spanning_tree_blocks_a_vlan_loop_and_prevents_duplicate_delivery() {
     let mut broadcast = frame(&lab, h1, h2);
     broadcast.destination = MacAddress::BROADCAST;
     lab.transmit(h1, broadcast).unwrap();
-    let outcomes = lab.run_until(SimTime(6_010)).unwrap();
+    let outcomes = lab.run_until(SimTime::from_millis(6_010)).unwrap();
     assert_eq!(
         outcomes
             .iter()
@@ -588,11 +588,11 @@ fn spanning_tree_blocks_a_vlan_loop_and_prevents_duplicate_delivery() {
     assert!(outcomes.len() < 10);
 
     lab.set_link_state(LinkId(3), LinkState::Down).unwrap();
-    lab.run_until(SimTime(32_000)).unwrap();
+    lab.run_until(SimTime::from_millis(32_000)).unwrap();
     let mut broadcast = frame(&lab, h1, h2);
     broadcast.destination = MacAddress::BROADCAST;
     lab.transmit(h1, broadcast).unwrap();
-    let reconverged = lab.run_until(SimTime(32_010)).unwrap();
+    let reconverged = lab.run_until(SimTime::from_millis(32_010)).unwrap();
     let reconverged_count =
         reconverged
             .iter()
@@ -669,7 +669,7 @@ fn ping_resolves_arp_then_exchanges_real_icmp_frames() {
     let local = lab.ping(a.device, "10.0.0.1".parse().unwrap()).unwrap();
     assert_eq!(local.received, 5);
     assert_eq!(local.round_trip_ms, [0, 0, 0, 0, 0]);
-    assert_eq!(lab.now(), SimTime(0));
+    assert_eq!(lab.now(), SimTime::from_millis(0));
 
     let result = lab.ping(a.device, "10.0.0.2".parse().unwrap()).unwrap();
     assert_eq!(result.received, 5);
@@ -679,7 +679,7 @@ fn ping_resolves_arp_then_exchanges_real_icmp_frames() {
             .render()
             .contains("!!!!!\nSuccess rate is 100 percent (5/5)")
     );
-    assert_eq!(lab.now(), SimTime(12));
+    assert_eq!(lab.now(), SimTime::from_millis(12));
     assert!(
         lab.device(a.device)
             .unwrap()
@@ -687,7 +687,7 @@ fn ping_resolves_arp_then_exchanges_real_icmp_frames() {
             .contains("10.0.0.0/24")
     );
     let arp = lab
-        .with_device_mut(a.device, |device| device.show_arp(SimTime(12)))
+        .with_device_mut(a.device, |device| device.show_arp(SimTime::from_millis(12)))
         .unwrap();
     assert!(arp.contains("10.0.0.2"));
     assert_eq!(lab.take_trace().len(), 24);
@@ -697,7 +697,7 @@ fn ping_resolves_arp_then_exchanges_real_icmp_frames() {
         .tx_packets;
     let second = lab.ping(a.device, "10.0.0.2".parse().unwrap()).unwrap();
     assert_eq!(second.received, 5);
-    assert_eq!(lab.now(), SimTime(22));
+    assert_eq!(lab.now(), SimTime::from_millis(22));
     assert_eq!(
         lab.device(a.device).unwrap().interfaces()[&a.interface]
             .counters
@@ -719,7 +719,7 @@ fn ping_timeout_and_no_route_are_deterministic() {
         Err(LabError::Ping(PingError::NoRoute(address)))
             if address == "192.0.2.1".parse::<std::net::Ipv4Addr>().unwrap()
     ));
-    assert_eq!(lab.now(), SimTime(0));
+    assert_eq!(lab.now(), SimTime::from_millis(0));
 
     let timeout = lab.ping(a.device, "10.0.0.99".parse().unwrap()).unwrap();
     assert_eq!(timeout.received, 0);
@@ -729,7 +729,7 @@ fn ping_timeout_and_no_route_are_deterministic() {
             .render()
             .contains(".....\nSuccess rate is 0 percent (0/5)")
     );
-    assert_eq!(lab.now(), SimTime(5_000));
+    assert_eq!(lab.now(), SimTime::from_millis(5_000));
     assert_eq!(lab.pending_events(), 0);
     assert_eq!(
         lab.device(a.device).unwrap().interfaces()[&a.interface]
@@ -1049,7 +1049,7 @@ fn dhcp_assigns_and_expires_a_usable_address_over_a_switch() {
     .unwrap()
     .unwrap();
 
-    lab.run_until(SimTime(20)).unwrap();
+    lab.run_until(SimTime::from_millis(20)).unwrap();
     let leased = lab
         .device(client.device)
         .unwrap()
@@ -1091,7 +1091,7 @@ fn dhcp_assigns_and_expires_a_usable_address_over_a_switch() {
         5
     );
 
-    lab.run_until(SimTime(3_600_008)).unwrap();
+    lab.run_until(SimTime::from_millis(3_600_008)).unwrap();
     assert!(
         lab.device(client.device)
             .unwrap()
@@ -1104,7 +1104,7 @@ fn dhcp_assigns_and_expires_a_usable_address_over_a_switch() {
             .interface_ipv4(client_two.interface)
             .is_none()
     );
-    lab.run_until(SimTime(3_600_020)).unwrap();
+    lab.run_until(SimTime::from_millis(3_600_020)).unwrap();
     assert_eq!(
         lab.device(client.device)
             .unwrap()
@@ -1182,7 +1182,7 @@ fn nat_overload_translates_and_reverses_icmp_without_an_outside_private_route() 
     assert!(translations.contains("203.0.113.1:10000"));
     assert!(translations.contains("10.0.0.2:"));
 
-    lab.run_until(SimTime(now.0 + 60_000)).unwrap();
+    lab.run_until(SimTime(now.0 + 60_000_000)).unwrap();
     let now = lab.now();
     let expired = lab
         .with_device_mut(router_inside.device, |device| {

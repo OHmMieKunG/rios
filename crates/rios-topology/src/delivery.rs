@@ -34,7 +34,11 @@ impl Lab {
         let time = self
             .now()
             .0
-            .checked_add(link.delay_ms)
+            .checked_add(
+                link.delay_ms
+                    .checked_mul(1000)
+                    .ok_or(rios_simulator::ScheduleError::Overflow)?,
+            )
             .ok_or(rios_simulator::ScheduleError::Overflow)?;
         let length = frame.len();
         let trace = TraceRecord {
@@ -274,7 +278,7 @@ impl Lab {
         let next = self
             .now()
             .0
-            .checked_add(HELLO_INTERVAL_MS)
+            .checked_add(HELLO_INTERVAL_MS * 1000)
             .ok_or(LabError::Capacity)?;
         self.events.schedule_at(
             SimTime(next),
@@ -312,7 +316,7 @@ impl Lab {
         let next = self
             .now()
             .0
-            .checked_add(STP_HELLO_MS)
+            .checked_add(STP_HELLO_MS * 1000)
             .ok_or(LabError::Capacity)?;
         self.events.schedule_at(
             SimTime(next),

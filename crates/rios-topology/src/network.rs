@@ -114,7 +114,7 @@ impl Lab {
             let deadline = SimTime(
                 self.now()
                     .0
-                    .checked_add(PING_TIMEOUT_MS)
+                    .checked_add(PING_TIMEOUT_MS * 1000)
                     .ok_or(PingError::TimeOverflow)?,
             );
             if self
@@ -152,7 +152,7 @@ impl Lab {
             match signal {
                 Some(PingSignal::Reply) => {
                     result.received += 1;
-                    result.round_trip_ms.push(self.now().0 - sent_at.0);
+                    result.round_trip_ms.push((self.now().0 - sent_at.0) / 1000);
                     result.markers.push('!');
                 }
                 Some(PingSignal::Unreachable) => result.markers.push('U'),
@@ -263,7 +263,7 @@ impl Lab {
             source,
             next_hop: route.next_hop,
             packet,
-            expires_at: SimTime(now.0.saturating_add(PING_TIMEOUT_MS)),
+            expires_at: SimTime(now.0.saturating_add(PING_TIMEOUT_MS * 1000)),
         });
         if request_needed {
             self.send_arp_request(source, route)?;
@@ -604,7 +604,7 @@ impl Lab {
                 let deadline = SimTime(
                     self.now()
                         .0
-                        .saturating_add(u64::from(seconds).saturating_mul(1000)),
+                        .saturating_add(u64::from(seconds).saturating_mul(1_000_000)),
                 );
                 self.devices
                     .get_mut(&interface.device)

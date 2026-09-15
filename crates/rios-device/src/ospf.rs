@@ -169,7 +169,7 @@ impl Device {
                 } else {
                     OspfNeighborState::Init
                 };
-                let deadline = SimTime(now.0.saturating_add(DEAD_INTERVAL_MS));
+                let deadline = SimTime(now.0.saturating_add(DEAD_INTERVAL_MS * 1000));
                 let changed = self
                     .ospf_runtime
                     .neighbors
@@ -285,7 +285,7 @@ impl Device {
                 "{:<15} {:<15?} {:>7} ms   {:<15} {}",
                 neighbor.router_id,
                 neighbor.state,
-                neighbor.dead_at.0.saturating_sub(now.0),
+                neighbor.dead_at.0.saturating_sub(now.0) / 1000,
                 neighbor.address,
                 name
             )

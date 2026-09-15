@@ -1,18 +1,29 @@
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, collections::BinaryHeap, fmt};
 
-/// Monotonic virtual time in milliseconds; unrelated to wall-clock time.
+/// Monotonic virtual time in microseconds; unrelated to wall-clock time.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SimTime(pub u64);
+impl SimTime {
+    /// Convert milliseconds, saturating at the end of the simulated time range.
+    pub const fn from_millis(milliseconds: u64) -> Self {
+        Self(milliseconds.saturating_mul(1000))
+    }
+
+    /// Whole milliseconds for user-facing reporting.
+    pub const fn as_millis(self) -> u64 {
+        self.0 / 1000
+    }
+}
 impl fmt::Display for SimTime {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "{:02}:{:02}:{:02}.{:03}",
-            self.0 / 3_600_000,
-            (self.0 / 60_000) % 60,
-            (self.0 / 1000) % 60,
-            self.0 % 1000
+            self.as_millis() / 3_600_000,
+            (self.as_millis() / 60_000) % 60,
+            (self.as_millis() / 1000) % 60,
+            self.as_millis() % 1000
         )
     }
 }
@@ -105,7 +116,7 @@ impl<E> EventQueue<E> {
         let time = self
             .now
             .0
-            .checked_add(delay_ms)
+            .checked_add(delay_ms.checked_mul(1000).ok_or(ScheduleError::Overflow)?)
             .ok_or(ScheduleError::Overflow)?;
         self.schedule_at(SimTime(time), event)
     }
@@ -130,6 +141,18 @@ impl<E> EventQueue<E> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn submillisecond_events_and_millisecond_timers_share_one_clock() {
+        let mut queue = EventQueue::default();
+        queue.schedule_after(1, 3).unwrap();
+        queue.schedule_at(SimTime(120), 1).unwrap();
+        queue.schedule_at(SimTime(120), 2).unwrap();
+        for (time, payload) in [(120, 1), (120, 2), (1000, 3)] {
+            let event = queue.step().unwrap();
+            assert_eq!((event.time.0, event.event), (time, payload));
+        }
+        assert_eq!(queue.now().to_string(), "00:00:00.001");
+    }
     #[test]
     fn deterministic_time_and_tie_order_without_ordered_payloads() {
         struct Payload(u8);

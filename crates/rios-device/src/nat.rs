@@ -130,7 +130,7 @@ impl Device {
             return false;
         };
         let entry = &mut self.nat_translations[index];
-        entry.expires_at = SimTime(now.0.saturating_add(NAT_TIMEOUT_MS));
+        entry.expires_at = SimTime(now.0.saturating_add(NAT_TIMEOUT_MS * 1000));
         packet.source = entry.inside_global_address;
         rewrite_source_port(packet, entry.inside_global_port)
     }
@@ -168,7 +168,7 @@ impl Device {
         }) else {
             return false;
         };
-        entry.expires_at = SimTime(now.0.saturating_add(NAT_TIMEOUT_MS));
+        entry.expires_at = SimTime(now.0.saturating_add(NAT_TIMEOUT_MS * 1000));
         packet.destination = entry.inside_local_address;
         rewrite_destination_port(packet, entry.inside_local_port)
     }
@@ -347,7 +347,12 @@ mod tests {
             .encode()
             .unwrap(),
         };
-        assert!(router.translate_nat_outbound(inside, outside, &mut outgoing, SimTime(0)));
+        assert!(router.translate_nat_outbound(
+            inside,
+            outside,
+            &mut outgoing,
+            SimTime::from_millis(0)
+        ));
         assert_eq!(outgoing.source, "203.0.113.1".parse::<Ipv4Addr>().unwrap());
         assert_eq!(
             UdpDatagram::decode(&outgoing.payload).unwrap().source_port,
@@ -367,7 +372,7 @@ mod tests {
             .encode()
             .unwrap(),
         };
-        assert!(router.translate_nat_inbound(outside, &mut reply, SimTime(1)));
+        assert!(router.translate_nat_inbound(outside, &mut reply, SimTime::from_millis(1)));
         assert_eq!(reply.destination, "10.0.0.2".parse::<Ipv4Addr>().unwrap());
         assert_eq!(
             UdpDatagram::decode(&reply.payload)

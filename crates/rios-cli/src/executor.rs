@@ -71,7 +71,12 @@ pub fn execute(
     session: &mut CliSession,
     command: Command,
 ) -> Result<Execution, CliError> {
-    execute_at(device, session, command, rios_simulator::SimTime(0))
+    execute_at(
+        device,
+        session,
+        command,
+        rios_simulator::SimTime::from_millis(0),
+    )
 }
 
 /// Execute using virtual time for time-dependent operational output.

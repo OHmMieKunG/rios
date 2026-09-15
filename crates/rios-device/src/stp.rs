@@ -188,7 +188,7 @@ impl Device {
             interface,
             StpReceived {
                 bpdu,
-                expires_at: SimTime(now.0.saturating_add(STP_MAX_AGE_MS)),
+                expires_at: SimTime(now.0.saturating_add(STP_MAX_AGE_MS * 1000)),
             },
         );
         self.recompute_stp_instance(vlan, members, now);
