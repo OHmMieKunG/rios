@@ -7,6 +7,8 @@ pub enum EtherType {
     Arp,
     Dot1Q,
     Other(u16),
+    /// IEEE 802.3 payload length, including LLC bytes.
+    Length(u16),
 }
 impl From<u16> for EtherType {
     fn from(value: u16) -> Self {
@@ -14,6 +16,7 @@ impl From<u16> for EtherType {
             0x0800 => Self::Ipv4,
             0x0806 => Self::Arp,
             0x8100 => Self::Dot1Q,
+            3..=1500 => Self::Length(value),
             v => Self::Other(v),
         }
     }
@@ -24,11 +27,11 @@ impl From<EtherType> for u16 {
             EtherType::Ipv4 => 0x0800,
             EtherType::Arp => 0x0806,
             EtherType::Dot1Q => 0x8100,
-            EtherType::Other(v) => v,
+            EtherType::Other(v) | EtherType::Length(v) => v,
         }
     }
 }
-/// A logical Ethernet II frame. Payload ownership moves through virtual links.
+/// A logical Ethernet II or IEEE 802.3 LLC frame. Payload ownership moves through virtual links.
 /// Preamble, padding, inter-frame gap, and FCS are not simulated.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EthernetFrame {
@@ -48,6 +51,15 @@ pub enum FrameError {
     InvalidVlanTag,
 }
 impl EthernetFrame {
+    /// Validate the Ethernet II type or an exact IEEE 802.3 payload length.
+    pub fn valid_length_or_type(&self) -> bool {
+        match self.ethertype {
+            EtherType::Length(length) => {
+                (3..=1500).contains(&length) && usize::from(length) == self.payload.len()
+            }
+            _ => u16::from(self.ethertype) >= 1536,
+        }
+    }
     /// Logical byte count used by counters (14-byte header plus payload, no FCS).
     pub fn len(&self) -> usize {
         14 + self.payload.len()
@@ -59,7 +71,7 @@ impl EthernetFrame {
     /// Encode an Ethernet II envelope without padding or FCS.
     pub fn encode(&self) -> Result<Vec<u8>, FrameError> {
         let ether: u16 = self.ethertype.into();
-        if ether < 0x0600 {
+        if !self.valid_length_or_type() {
             return Err(FrameError::LengthField);
         }
         let mut out = Vec::with_capacity(self.len());
@@ -75,14 +87,18 @@ impl EthernetFrame {
             return Err(FrameError::Truncated);
         }
         let ether = u16::from_be_bytes([bytes[12], bytes[13]]);
-        if ether < 0x0600 {
-            return Err(FrameError::LengthField);
-        }
+        let payload = match ether {
+            3..=1500 => bytes
+                .get(14..14 + usize::from(ether))
+                .ok_or(FrameError::Truncated)?,
+            0..=1535 => return Err(FrameError::LengthField),
+            _ => &bytes[14..],
+        };
         Ok(Self {
             destination: MacAddress(bytes[..6].try_into().unwrap()),
             source: MacAddress(bytes[6..12].try_into().unwrap()),
             ethertype: ether.into(),
-            payload: bytes[14..].to_vec(),
+            payload: payload.to_vec(),
         })
     }
 
@@ -108,7 +124,10 @@ impl EthernetFrame {
         let tci = u16::from_be_bytes([self.payload[0], self.payload[1]]);
         let vlan = VlanId::new(tci & 0x0fff).map_err(|_| FrameError::InvalidVlanTag)?;
         let inner = u16::from_be_bytes([self.payload[2], self.payload[3]]);
-        if inner < 0x0600 || inner == u16::from(EtherType::Dot1Q) {
+        if inner < 0x0600
+            && (!(3..=1500).contains(&inner) || usize::from(inner) != self.payload.len() - 4)
+            || inner == u16::from(EtherType::Dot1Q)
+        {
             return Err(FrameError::InvalidVlanTag);
         }
         Ok((
@@ -150,6 +169,23 @@ mod tests {
         );
         assert!(MacAddress::BROADCAST.is_multicast());
         assert!(!MacAddress([2, 0, 0, 0, 0, 1]).is_multicast());
+    }
+
+    #[test]
+    fn llc_length_fields_preserve_payload_and_allow_wire_padding() {
+        let frame = EthernetFrame {
+            source: MacAddress([2, 0, 0, 0, 0, 1]),
+            destination: MacAddress([1, 0x80, 0xc2, 0, 0, 0]),
+            ethertype: EtherType::Length(4),
+            payload: vec![0x42, 0x42, 3, 0],
+        };
+        let mut bytes = frame.encode().unwrap();
+        bytes.resize(60, 0);
+        assert_eq!(EthernetFrame::decode(&bytes).unwrap(), frame);
+        let tagged = frame.clone().tagged(VlanId::new(10).unwrap());
+        assert_eq!(tagged.untagged().unwrap().1, frame);
+        bytes[12..14].copy_from_slice(&100u16.to_be_bytes());
+        assert_eq!(EthernetFrame::decode(&bytes), Err(FrameError::Truncated));
     }
 
     #[test]

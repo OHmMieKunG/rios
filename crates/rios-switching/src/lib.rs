@@ -20,6 +20,8 @@ pub enum StpPortRole {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StpPortState {
     Blocking,
+    Listening,
+    Learning,
     Forwarding,
 }
 
@@ -83,3 +85,5 @@ mod tests {
 
 mod lacp;
 pub use lacp::*;
+mod rstp;
+pub use rstp::*;
