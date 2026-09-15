@@ -288,3 +288,36 @@ fn lab_links_expose_transmission_policy_and_counters() {
     assert!(text.contains("queue 100 packets/direction"));
     assert!(text.contains("A->B: queued 0, TX 0, RX 0"));
 }
+
+#[test]
+fn capture_commands_create_and_close_pcapng() {
+    let path = std::env::temp_dir().join(format!("rios-cli-capture-{}.pcapng", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rios"))
+        .args(["lab", "examples/two-routers.yaml"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let commands = format!(
+        "cap ?\ncap start {} int R1:gi0/0\ncap stop\nexit\n",
+        path.display()
+    );
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(commands.as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("Capture started:"));
+    assert!(text.contains("Capture stopped."));
+    assert!(text.contains("Stop and flush capture"));
+    assert_eq!(
+        &std::fs::read(&path).unwrap()[..4],
+        &0x0a0d0d0au32.to_le_bytes()
+    );
+    std::fs::remove_file(path).unwrap();
+}

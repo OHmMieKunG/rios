@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 /// Single owner of a lab's devices, links, clock, and pending traffic.
 #[derive(Debug, Default)]
 pub struct Lab {
+    pub(crate) capture: Option<crate::capture::Capture>,
     pub(crate) seed: u64,
     pub(crate) rng: rios_simulator::SimulationRng,
     next_link_id: u64,
@@ -531,6 +532,7 @@ impl Lab {
         action: TraceAction,
         frame: &EthernetFrame,
     ) {
+        self.capture_frame(interface, action, frame);
         if self.tracing {
             self.trace.push(TraceRecord {
                 time: self.now(),

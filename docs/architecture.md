@@ -226,3 +226,20 @@ Drops consume serialization time. An outage resets queue reservations and
 invalidates outstanding traffic by generation. Removed link IDs are never reused.
 `links` displays transmission policy, queue occupancy, and directional counters;
 `show interfaces` displays reason-specific drop counters.
+
+## Packet capture
+
+`capture start <new-file.pcapng> [device <name> | interface <device:port>]`
+starts an observational capture; `capture stop` flushes and closes it. The writer
+streams Section Header, Interface Description, and Enhanced Packet blocks using
+little-endian PCAPNG, Ethernet link type, microsecond timestamps, interface names,
+and inbound/outbound packet flags. It follows the public
+[PCAPNG format specification](https://www.ietf.org/archive/id/draft-tuexen-opsawg-pcapng-05.html).
+Packets are the actual physical-interface TX/RX bytes, including VLAN headers;
+logical SVI observations are excluded to avoid synthetic duplicates. TX records
+use the admission time, while RX records include serialization and propagation.
+The file contains both ends of each successful cable transfer unless filtered.
+Capture never consumes RNG samples or schedules events. File creation refuses
+overwrite. A bounded writer buffer streams to disk, capped at 1 GiB per capture;
+write failures disable further recording, are available through `capture_error`,
+and are reported by `capture stop` without aborting simulated forwarding.

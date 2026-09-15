@@ -150,3 +150,51 @@ fn policy_roundtrip_and_validation() {
         );
     }
 }
+
+#[test]
+fn capture_is_observational_and_filters_interfaces() {
+    use rios_topology::CaptureFilter;
+    let path = std::env::temp_dir().join(format!("rios-observer-{}.pcapng", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let exercise = |capture| {
+        let (mut lab, a, b) = setup(
+            42,
+            "    bandwidth: 100mbps\n    jitter_ms: 2\n    loss_percent: 20\n",
+        );
+        if capture {
+            lab.start_capture(&path, CaptureFilter::Interface(a))
+                .unwrap();
+        }
+        for sequence in 0..20 {
+            lab.transmit(a, frame(sequence)).unwrap();
+            lab.transmit(b, frame(sequence)).unwrap();
+        }
+        let events = lab.run_until(SimTime::from_millis(100)).unwrap();
+        if capture {
+            lab.stop_capture().unwrap();
+        }
+        (events, lab.take_trace(), lab.links()[&LinkId(1)].clone())
+    };
+    let expected = exercise(false);
+    assert_eq!(exercise(true), expected);
+    let bytes = std::fs::read(&path).unwrap();
+    let mut interfaces = 0;
+    let mut packets = 0;
+    let mut offset = 0;
+    while offset < bytes.len() {
+        let kind = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+        let length = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap()) as usize;
+        if kind == 1 {
+            interfaces += 1;
+        }
+        if kind == 6 {
+            packets += 1;
+        }
+        offset += length;
+    }
+    assert_eq!(interfaces, 1);
+    assert!(packets > 20 && packets < 40);
+    let (mut lab, _, _) = setup(0, "");
+    assert!(lab.start_capture(&path, CaptureFilter::All).is_err());
+    std::fs::remove_file(path).unwrap();
+}

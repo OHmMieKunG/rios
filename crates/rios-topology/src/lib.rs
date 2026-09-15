@@ -1,7 +1,9 @@
 //! Validated virtual labs, YAML inventory, and deterministic Ethernet delivery.
 //! Owns concrete simulation events; depends on devices but never on the CLI.
 #![forbid(unsafe_code)]
+mod capture;
 mod delivery;
+pub use capture::CaptureFilter;
 mod lab;
 mod network;
 mod yaml;
@@ -112,6 +114,8 @@ pub struct TraceRecord {
 /// Topology, device, scheduling, and delivery failures.
 #[derive(Debug, thiserror::Error)]
 pub enum LabError {
+    #[error("capture: {0}")]
+    Capture(String),
     #[error("invalid topology: {0}")]
     InvalidTopology(String),
     #[error("unknown device: {0}")]

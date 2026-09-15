@@ -14,10 +14,19 @@ const COMMANDS: &[(&str, &str)] = &[
     ("connect", "Connect to a device"),
     ("links", "Show virtual links"),
     ("trace", "Enable or disable packet tracing"),
+    ("capture", "Record Ethernet packets in a PCAPNG file"),
     ("step", "Process one event"),
     ("run", "Advance to an absolute simulated millisecond"),
     ("help", "Show lab commands"),
     ("exit", "Exit simulator"),
+];
+const CAPTURE_ACTIONS: &[(&str, &str)] = &[
+    ("start", "Start capture"),
+    ("stop", "Stop and flush capture"),
+];
+const CAPTURE_FILTERS: &[(&str, &str)] = &[
+    ("device", "Capture one device"),
+    ("interface", "Capture one interface"),
 ];
 const DEVICE_TYPES: &[(&str, &str)] = &[
     ("router", "Create a router"),
@@ -98,6 +107,20 @@ pub fn complete(input: &str, names: &[String]) -> Vec<Suggestion> {
     };
     let args = &prior[1..];
     match command {
+        "capture" if args.is_empty() => matching(CAPTURE_ACTIONS, partial, start),
+        "capture" if resolve(args[0], CAPTURE_ACTIONS) == Ok("start") && args.len() == 1 => {
+            placeholder("<path>", "New PCAPNG file", start)
+        }
+        "capture" if resolve(args[0], CAPTURE_ACTIONS) == Ok("start") && args.len() == 2 => {
+            let mut choices = matching(CAPTURE_FILTERS, partial, start);
+            if partial.is_empty() {
+                choices.extend(placeholder("<cr>", "Capture all devices", start));
+            }
+            choices
+        }
+        "capture" if args.len() == 3 => {
+            placeholder("<name>", "Device name or device:interface", start)
+        }
         "spawn" if args.is_empty() => matching(DEVICE_TYPES, partial, start),
         "spawn" if args.len() == 1 && resolve(args[0], DEVICE_TYPES).is_err() => {
             matching(DEVICE_TYPES, args[0], input.find(args[0]).unwrap_or(start))
@@ -192,6 +215,7 @@ pub fn process(app: &mut App, input: &str) -> bool {
     };
     let args = &tokens[1..];
     let result = match (command, args) {
+        ("capture", args) => capture(app, args),
         ("spawn", args) => spawn(app, args),
         ("connect", [first, second]) => link(app, first, second, 1),
         ("link", [first, second]) => link(app, first, second, 1),
@@ -405,5 +429,39 @@ fn link(
 ) -> Result<(), rios_topology::LabError> {
     app.link(first, second, delay)?;
     println!("Connected {first} <-> {second} (delay {delay} ms).");
+    Ok(())
+}
+
+fn capture(app: &mut App, args: &[&str]) -> Result<(), rios_topology::LabError> {
+    use rios_topology::{CaptureFilter, LabError};
+    match args {
+        [action] if resolve(action, CAPTURE_ACTIONS) == Ok("stop") => {
+            app.lab.stop_capture()?;
+            println!("Capture stopped.");
+        }
+        [action, path, rest @ ..] if resolve(action, CAPTURE_ACTIONS) == Ok("start") => {
+            let filter = match rest {
+                [] => CaptureFilter::All,
+                [kind, name] if resolve(kind, CAPTURE_FILTERS) == Ok("device") => {
+                    CaptureFilter::Device(app.lab.device_id(name)?)
+                }
+                [kind, name] if resolve(kind, CAPTURE_FILTERS) == Ok("interface") => {
+                    CaptureFilter::Interface(app.lab.endpoint(name)?)
+                }
+                _ => {
+                    return Err(LabError::Capture(
+                        "expected [device <name> | interface <device:interface>]".into(),
+                    ));
+                }
+            };
+            app.lab.start_capture(Path::new(path), filter)?;
+            println!("Capture started: {path}");
+        }
+        _ => {
+            return Err(LabError::Capture(
+                "expected start <file.pcapng> or stop".into(),
+            ));
+        }
+    }
     Ok(())
 }
