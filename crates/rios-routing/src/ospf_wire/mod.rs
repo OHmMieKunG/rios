@@ -1,5 +1,6 @@
 //! Bounded, standard OSPFv2 packet and LSA wire codecs (RFC 2328).
 mod lsa;
+use crate::ExchangeAdvertisement;
 pub use lsa::*;
 use rios_ipv4::checksum;
 use std::net::Ipv4Addr;
@@ -30,18 +31,18 @@ pub struct OspfHello {
 }
 /// Five OSPFv2 packet bodies.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum OspfBody {
-    Hello(OspfHello),
+pub enum OspfBody<L: ExchangeAdvertisement = Lsa> {
+    Hello(L::Hello),
     DatabaseDescription {
         mtu: u16,
-        options: u8,
+        options: u32,
         flags: u8,
         sequence: u32,
-        headers: Vec<LsaHeader>,
+        headers: Vec<L::Header>,
     },
-    LinkStateRequest(Vec<LsaKey>),
-    LinkStateUpdate(Vec<Lsa>),
-    LinkStateAck(Vec<LsaHeader>),
+    LinkStateRequest(Vec<L::Key>),
+    LinkStateUpdate(Vec<L>),
+    LinkStateAck(Vec<L::Header>),
 }
 /// OSPFv2 packet with null authentication and a validated checksum.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,7 +82,10 @@ impl OspfV2Packet {
                     return Err(WireError::TooLarge);
                 }
                 body.extend_from_slice(&mtu.to_be_bytes());
-                body.extend_from_slice(&[*options, *flags]);
+                body.extend_from_slice(&[
+                    u8::try_from(*options).map_err(|_| WireError::Unsupported)?,
+                    *flags,
+                ]);
                 body.extend_from_slice(&sequence.to_be_bytes());
                 for header in headers {
                     body.extend_from_slice(&header.encode());
@@ -187,7 +191,7 @@ impl OspfV2Packet {
                 }
                 OspfBody::DatabaseDescription {
                     mtu: u16::from_be_bytes([body[0], body[1]]),
-                    options: body[2],
+                    options: u32::from(body[2]),
                     flags: body[3],
                     sequence: u32::from_be_bytes([body[4], body[5], body[6], body[7]]),
                     headers: headers(&body[8..])?,

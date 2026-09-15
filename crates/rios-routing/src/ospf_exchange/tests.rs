@@ -1,4 +1,5 @@
 use super::*;
+use crate::LsaKey;
 use crate::{LSA_INITIAL_SEQUENCE, LsaBody, OspfV2Packet};
 use std::collections::{BTreeSet, VecDeque};
 fn id(n: u8) -> Ipv4Addr {
