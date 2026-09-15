@@ -195,6 +195,9 @@ impl Device {
             if let Some(next_hop) = route.next_hop {
                 let (code, distance) = match route.source {
                     RouteSource::Ospf => ("O", 110),
+                    RouteSource::OspfInterArea => ("O IA", 110),
+                    RouteSource::OspfExternal1 => ("O E1", 110),
+                    RouteSource::OspfExternal2 => ("O E2", 110),
                     _ => ("S", route.administrative_distance),
                 };
                 writeln!(

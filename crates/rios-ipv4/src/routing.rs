@@ -61,6 +61,9 @@ pub enum RouteSource {
     Connected,
     Static,
     Ospf,
+    OspfInterArea,
+    OspfExternal1,
+    OspfExternal2,
     Rip,
     Bgp,
 }

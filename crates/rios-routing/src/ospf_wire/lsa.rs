@@ -1,4 +1,4 @@
-//! OSPFv2 LSA headers, Type 1/2/3/5 bodies, and Fletcher checksums.
+//! OSPFv2 LSA headers, Type 1/2/3/4/5 bodies, and Fletcher checksums.
 use super::WireError;
 use std::net::Ipv4Addr;
 
@@ -9,6 +9,7 @@ pub enum LsaType {
     Router = 1,
     Network = 2,
     Summary = 3,
+    AsbrSummary = 4,
     External = 5,
 }
 impl TryFrom<u8> for LsaType {
@@ -18,6 +19,7 @@ impl TryFrom<u8> for LsaType {
             1 => Ok(Self::Router),
             2 => Ok(Self::Network),
             3 => Ok(Self::Summary),
+            4 => Ok(Self::AsbrSummary),
             5 => Ok(Self::External),
             _ => Err(WireError::Unsupported),
         }
@@ -70,6 +72,9 @@ pub enum LsaBody {
     },
     Summary {
         mask: Ipv4Addr,
+        metric: u32,
+    },
+    AsbrSummary {
         metric: u32,
     },
     External {
@@ -140,6 +145,7 @@ impl Lsa {
                 LsaBody::Router { .. } => LsaType::Router,
                 LsaBody::Network { .. } => LsaType::Network,
                 LsaBody::Summary { .. } => LsaType::Summary,
+                LsaBody::AsbrSummary { .. } => LsaType::AsbrSummary,
                 LsaBody::External { .. } => LsaType::External,
             },
             link_state_id: self.link_state_id,
@@ -177,6 +183,13 @@ impl Lsa {
                 for router in routers {
                     body.extend_from_slice(&router.octets());
                 }
+            }
+            LsaBody::AsbrSummary { metric } => {
+                if *metric > 0x00ff_ffff {
+                    return Err(WireError::Malformed);
+                }
+                body.extend_from_slice(&[0; 4]);
+                body.extend_from_slice(&metric.to_be_bytes());
             }
             LsaBody::Summary { mask, metric } | LsaBody::External { mask, metric, .. } => {
                 if !valid_mask(*mask) || *metric > 0x00ff_ffff {
@@ -283,9 +296,9 @@ impl Lsa {
                         .collect(),
                 }
             }
-            LsaType::Summary | LsaType::External => {
+            LsaType::Summary | LsaType::AsbrSummary | LsaType::External => {
                 if body.len()
-                    != if header.key.kind == LsaType::Summary {
+                    != if header.key.kind != LsaType::External {
                         8
                     } else {
                         16
@@ -295,13 +308,17 @@ impl Lsa {
                     return Err(WireError::Malformed);
                 }
                 let metric = u32::from_be_bytes([0, body[5], body[6], body[7]]);
-                if header.key.kind == LsaType::Summary {
+                if header.key.kind != LsaType::External {
                     if body[4] != 0 {
                         return Err(WireError::Unsupported);
                     }
-                    LsaBody::Summary {
-                        mask: ip(&body[..4]),
-                        metric,
+                    if header.key.kind == LsaType::AsbrSummary {
+                        LsaBody::AsbrSummary { metric }
+                    } else {
+                        LsaBody::Summary {
+                            mask: ip(&body[..4]),
+                            metric,
+                        }
                     }
                 } else {
                     if body[4] & 0x7f != 0 {
