@@ -347,3 +347,29 @@ option 82, DHCP authentication, DHCPINFORM, and multiple helper destinations rem
 outside this milestone. Tests cover remote allocation through a transit router,
 options, reservations, NAK, renewal, rebind, expiry, duplicate address detection,
 configuration replay, and malformed packet decoding.
+
+### EtherChannel and LACP
+
+Physical Ethernet ports can join `channel-group N mode on|active|passive`.
+The logical `Port-channelN` owns routed or access/trunk configuration; MAC
+learning and STP use that logical identity. Egress selects exactly one available
+member with a deterministic source/destination MAC hash. Each physical link
+retains its own serialization queue. A bundle supports up to eight same-speed
+members and survives individual member failure.
+
+LACP uses version 1 Slow Protocol Ethernet frames (0x8809), actor/partner TLVs,
+partner identity checks, synchronization, collecting, and distributing flags.
+Active ports initiate negotiation; passive pairs remain suspended. Partner system
+and key selection prevents merging incompatible peers. One-second periodic events
+expire silent partners against a three-second timeout; expiry is processed at the
+next periodic tick. Protocol semantics follow public
+[IEEE link aggregation descriptions](https://1.ieee802.org/tsn/802-1ax-rev/).
+LACP is consumed on physical members, independently of logical/STP forwarding.
+
+`show etherchannel summary`, `show lacp neighbor`, and
+`show interfaces port-channel1` report structured runtime state. Configuration
+renders/replays through the same command engine. Tests cover codec validation,
+active/passive negotiation, passive/passive inactivity, peer timeout, routed
+failover, VLAN trunk forwarding, one-copy broadcast flooding, and logical MAC
+learning. Marker protocol, configurable slow timers, minimum-links, resilient
+hashing, and multi-chassis aggregation are not implemented.

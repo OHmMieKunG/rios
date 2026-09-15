@@ -174,6 +174,7 @@ fn parse_input(
         Action::DhcpLease | Action::DhcpDns | Action::DhcpExcluded => usize::MAX,
         Action::DhcpHost => 2,
         Action::DhcpDomain | Action::DhcpHardware | Action::DhcpHelper => 1,
+        Action::ChannelGroup => 3,
         Action::NatPool => 5,
         Action::AccessGroup => 2,
         Action::DhcpNetwork => 2,
@@ -189,7 +190,8 @@ fn parse_input(
         | Action::DhcpDefaultRouter => 1,
         Action::RouterOspf => 1,
         Action::OspfNetwork => 4,
-        Action::Interface
+        Action::Interfaces
+        | Action::Interface
         | Action::Description
         | Action::AclPermit
         | Action::AclDeny
@@ -197,7 +199,9 @@ fn parse_input(
         Action::NamedStandardAcl | Action::NamedExtendedAcl | Action::NoAclSequence => 1,
         _ => 0,
     };
-    if expected > 0 && args.is_empty() || expected != usize::MAX && args.len() < expected {
+    if expected > 0 && args.is_empty() && !matches!(action, Action::Interfaces)
+        || expected != usize::MAX && args.len() < expected
+    {
         return Err(ParseError::Incomplete);
     }
     if expected != usize::MAX && args.len() > expected {
@@ -277,6 +281,9 @@ fn parse_input(
                 Command::ShowRunningConfig
                     | Command::ShowStartupConfig
                     | Command::ShowInterfaces
+                    | Command::ShowInterface(_)
+                    | Command::ShowEtherchannelSummary
+                    | Command::ShowLacpNeighbor
                     | Command::ShowInterfacesStatus
                     | Command::ShowIpInterfaceBrief
                     | Command::ShowIpRoute
@@ -318,7 +325,12 @@ fn parse_input(
             if args.len() > 2 {
                 return Err(invalid(args[2].offset, "unexpected argument"));
             }
-            if args.len() == 2 && !args[0].text.chars().all(|c| c.is_ascii_alphabetic()) {
+            if args.len() == 2
+                && !args[0]
+                    .text
+                    .chars()
+                    .all(|c| c.is_ascii_alphabetic() || c == '-')
+            {
                 return Err(invalid(args[1].offset, "unexpected interface suffix"));
             }
             let value = args.iter().map(|t| t.text).collect::<String>();
@@ -518,7 +530,38 @@ fn parse_input(
         NoSwitchport => Command::NoSwitchport,
         Running => Command::ShowRunningConfig,
         Startup => Command::ShowStartupConfig,
-        Interfaces => Command::ShowInterfaces,
+        Interfaces => {
+            if args.is_empty() {
+                Command::ShowInterfaces
+            } else {
+                let value = args
+                    .iter()
+                    .map(|token| token.text)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let (name, _) = canonical_interface(&value)
+                    .map_err(|error| invalid(args[0].offset, error.to_string()))?;
+                Command::ShowInterface(name)
+            }
+        }
+        EtherchannelSummary => Command::ShowEtherchannelSummary,
+        LacpNeighbor => Command::ShowLacpNeighbor,
+        ChannelGroup => {
+            let number = args[0]
+                .text
+                .parse::<u16>()
+                .ok()
+                .filter(|number| (1..=4096).contains(number))
+                .ok_or_else(|| invalid(args[0].offset, "expected channel number 1-4096"))?;
+            unique_choice(&args[1], &["mode"])?;
+            let mode = match unique_choice(&args[2], &["on", "active", "passive"])? {
+                "on" => rios_config::ChannelMode::On,
+                "active" => rios_config::ChannelMode::Active,
+                _ => rios_config::ChannelMode::Passive,
+            };
+            Command::SetChannelGroup { number, mode }
+        }
+        NoChannelGroup => Command::ClearChannelGroup,
         InterfacesStatus => Command::ShowInterfacesStatus,
         Brief => Command::ShowIpInterfaceBrief,
         Save => Command::SaveConfig,
@@ -678,7 +721,7 @@ pub fn suggestions(
             });
         }
     }
-    if !result.is_empty() {
+    if !result.is_empty() && !matches!(node.action, Some(Action::Interfaces)) {
         if matches!(node.action, Some(Action::NatOverload)) {
             result.extend(nat::suggest(Action::NatOverload, &[], partial, start)?);
         }
@@ -719,9 +762,19 @@ pub fn suggestions(
                 .collect());
         }
 
-        if matches!(action, Action::Interface) {
+        if matches!(action, Action::Interface | Action::Interfaces) {
             if args.is_empty() {
+                if matches!(action, Action::Interfaces) && partial.is_empty() {
+                    result.push(Suggestion {
+                        word: "<cr>".into(),
+                        help: String::new(),
+                        start,
+                    });
+                }
                 for family in action.argument_help() {
+                    if matches!(action, Action::Interfaces) && *family == "range" {
+                        continue;
+                    }
                     if family
                         .to_ascii_lowercase()
                         .starts_with(&partial.to_ascii_lowercase())
@@ -836,6 +889,9 @@ pub fn suggestions(
                 | Action::DhcpHelper => {
                     return dhcp::suggest(action, args, partial, start);
                 }
+                Action::ChannelGroup if args.is_empty() => "<1-4096>",
+                Action::ChannelGroup if args.len() == 1 => "mode",
+                Action::ChannelGroup if args.len() == 2 => "on|active|passive",
                 Action::Dot1q if args.is_empty() => "<vlan-id>",
                 Action::Dot1q if args.len() == 1 => {
                     parse_configuration(input[..start].trim_end(), mode)?;

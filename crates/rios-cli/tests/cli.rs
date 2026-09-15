@@ -873,3 +873,47 @@ fn dhcp_options_reservations_and_helper_replay() {
         .is_err()
     );
 }
+
+#[test]
+fn port_channel_modes_ranges_help_and_config_replay() {
+    let mut router = Device::standalone();
+    let mut session = CliSession {
+        mode: CliMode::GlobalConfiguration,
+    };
+    for command in [
+        "interface range gi0/0-1",
+        "no shut",
+        "channel-group 1 mode active",
+        "exit",
+        "interface port-channel 1",
+        "ip address 10.0.0.1 255.255.255.0",
+        "end",
+    ] {
+        run(&mut router, &mut session, command).unwrap();
+    }
+    let rendered = router.running_config().render();
+    let mut restored = Device::standalone();
+    load_configuration(&mut restored, &rendered).unwrap();
+    assert_eq!(restored.running_config(), router.running_config());
+    let output = run(&mut router, &mut session, "sh int po1").unwrap().output;
+    assert!(output.contains("Port-channel1"));
+    assert!(!output.contains("GigabitEthernet0/0"));
+    assert!(
+        run(&mut router, &mut session, "sh ether su")
+            .unwrap()
+            .output
+            .contains("LACP")
+    );
+    assert!(
+        run(&mut router, &mut session, "sh lacp ne")
+            .unwrap()
+            .output
+            .contains("Partner")
+    );
+    assert!(
+        suggestions("sh int po", session.mode, &[])
+            .unwrap()
+            .iter()
+            .any(|s| s.word == "Port-channel")
+    );
+}

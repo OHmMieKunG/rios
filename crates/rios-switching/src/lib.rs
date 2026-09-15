@@ -80,3 +80,6 @@ mod tests {
         assert_eq!(ConfigurationBpdu::decode(&bpdu.encode()).unwrap(), bpdu);
     }
 }
+
+mod lacp;
+pub use lacp::*;

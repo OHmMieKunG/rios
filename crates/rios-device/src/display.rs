@@ -34,8 +34,21 @@ impl Device {
     }
     /// Detailed interface configuration and runtime counters.
     pub fn show_interfaces(&self) -> String {
+        self.render_interfaces(None)
+    }
+    /// Detailed counters and configuration for one existing interface.
+    pub fn show_interface(&self, id: InterfaceId) -> Result<String, DeviceError> {
+        if !self.interfaces.contains_key(&id) {
+            return Err(DeviceError::MissingInterface);
+        }
+        Ok(self.render_interfaces(Some(id)))
+    }
+    fn render_interfaces(&self, selected: Option<InterfaceId>) -> String {
         let mut out = String::new();
         for (id, interface) in &self.interfaces {
+            if selected.is_some_and(|selected| selected != *id) {
+                continue;
+            }
             let config = &self.running_config.interfaces[id];
             let status = if config.admin_state == AdminState::Down {
                 "administratively down"

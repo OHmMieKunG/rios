@@ -66,6 +66,10 @@ pub(crate) enum Action {
     Running,
     Startup,
     Interfaces,
+    EtherchannelSummary,
+    LacpNeighbor,
+    ChannelGroup,
+    NoChannelGroup,
     InterfacesStatus,
     Brief,
     Routes,
@@ -85,8 +89,10 @@ impl Action {
         match self {
             Self::Hostname | Self::NamedStandardAcl | Self::NamedExtendedAcl => &["<name>"],
             Self::NoAclSequence => &["<sequence>"],
-            Self::Interface => &[
+            Self::ChannelGroup => &["<1-4096> mode on|active|passive"],
+            Self::Interface | Self::Interfaces => &[
                 "range",
+                "Port-channel",
                 "GigabitEthernet",
                 "TenGigabitEthernet",
                 "Serial",
@@ -262,6 +268,22 @@ pub(crate) fn tree(mode: CliMode) -> Node {
                     action,
                 );
             }
+            root.add(
+                &[
+                    ("show", ""),
+                    ("etherchannel", "Aggregation state"),
+                    ("summary", "Bundle summary"),
+                ],
+                EtherchannelSummary,
+            );
+            root.add(
+                &[
+                    ("show", ""),
+                    ("lacp", "LACP state"),
+                    ("neighbor", "Received partners"),
+                ],
+                LacpNeighbor,
+            );
             root.add(&[("ping", "Send ICMP echo requests")], Ping);
             if mode == CliMode::UserExec {
                 root.add(&[("enable", "Enter privileged EXEC")], Enable);
@@ -459,6 +481,16 @@ pub(crate) fn tree(mode: CliMode) -> Node {
                 root.add(
                     &[("ip", ""), ("helper-address", "DHCP relay server")],
                     DhcpHelper,
+                );
+            }
+            if matches!(
+                mode,
+                CliMode::InterfaceConfiguration(_) | CliMode::InterfaceRangeConfiguration(_, _)
+            ) {
+                root.add(&[("channel-group", "Bundle membership")], ChannelGroup);
+                root.add(
+                    &[("no", ""), ("channel-group", "Remove bundle membership")],
+                    NoChannelGroup,
                 );
             }
             if matches!(mode, CliMode::DhcpPoolConfiguration(_)) {

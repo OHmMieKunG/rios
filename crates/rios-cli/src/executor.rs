@@ -48,6 +48,9 @@ fn executable_after_do(command: &Command) -> bool {
         Command::ShowRunningConfig
             | Command::ShowStartupConfig
             | Command::ShowInterfaces
+            | Command::ShowInterface(_)
+            | Command::ShowEtherchannelSummary
+            | Command::ShowLacpNeighbor
             | Command::ShowInterfacesStatus
             | Command::ShowIpInterfaceBrief
             | Command::ShowIpRoute
@@ -116,6 +119,10 @@ pub fn execute_at(
         Command::AddAclEntry { .. } | Command::RemoveAclEntry(_) => {
             matches!(mode, AccessListConfiguration(_, _))
         }
+        Command::SetChannelGroup { .. } | Command::ClearChannelGroup => matches!(
+            mode,
+            InterfaceConfiguration(_) | InterfaceRangeConfiguration(_, _)
+        ),
         Command::SetNamedAccessGroup { .. } => matches!(
             mode,
             InterfaceConfiguration(_) | SubinterfaceConfiguration(_)
@@ -175,6 +182,9 @@ pub fn execute_at(
             InterfaceConfiguration(_) | SubinterfaceConfiguration(_)
         ),
         Command::ShowInterfaces
+        | Command::ShowInterface(_)
+        | Command::ShowEtherchannelSummary
+        | Command::ShowLacpNeighbor
         | Command::ShowIpInterfaceBrief
         | Command::ShowInterfacesStatus
         | Command::ShowIpRoute
@@ -414,6 +424,24 @@ pub fn execute_at(
             )
         }
         Command::ShowInterfaces => result.output = device.show_interfaces(),
+        Command::ShowInterface(name) => {
+            let id = device
+                .find_interface(&name)
+                .ok_or(DeviceError::MissingInterface)?;
+            result.output = device.show_interface(id)?;
+        }
+        Command::ShowEtherchannelSummary => result.output = device.show_etherchannel_summary(),
+        Command::ShowLacpNeighbor => result.output = device.show_lacp_neighbor(),
+        Command::SetChannelGroup {
+            number,
+            mode: channel_mode,
+        } => edit_interfaces(device, mode, |device, id| {
+            device.set_channel_group(id, number, channel_mode)
+        })?,
+        Command::ClearChannelGroup => {
+            edit_interfaces(device, mode, |device, id| device.clear_channel_group(id))?
+        }
+
         Command::ShowInterfacesStatus => result.output = device.show_interfaces_status(),
         Command::ShowIpInterfaceBrief => result.output = device.show_ip_interface_brief(),
         Command::ShowIpRoute => result.output = device.show_ip_route(),

@@ -2,6 +2,8 @@
 #![forbid(unsafe_code)]
 mod acl;
 mod channel;
+mod lacp;
+pub use lacp::LacpNeighbor;
 mod dhcp;
 mod display;
 mod ethernet;
@@ -118,6 +120,7 @@ pub struct Interface {
 /// A virtual device with privately owned runtime and configuration state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Device {
+    lacp_neighbors: BTreeMap<InterfaceId, LacpNeighbor>,
     tcp: tcp::TcpRuntime,
     acl_matches: BTreeMap<(rios_config::AclId, u32), u64>,
     acl_logs: BTreeMap<(rios_config::AclId, u32), u64>,
@@ -264,6 +267,7 @@ impl Device {
             vlans.insert(VlanId::DEFAULT, VlanConfig::default());
         }
         Ok(Self {
+            lacp_neighbors: BTreeMap::new(),
             tcp: tcp::TcpRuntime::default(),
             acl_matches: BTreeMap::new(),
             acl_logs: BTreeMap::new(),
@@ -812,6 +816,7 @@ impl Device {
             .ok_or(DeviceError::MissingInterface)?
             .link_state = state;
         if state == LinkState::Down {
+            self.lacp_neighbors.remove(&id);
             self.mac_table.retain(|_, entry| entry.interface != id);
         }
         Ok(())

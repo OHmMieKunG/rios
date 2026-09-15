@@ -72,6 +72,9 @@ pub(crate) enum SimulationEvent {
         device: rios_simulator::DeviceId,
         generation: u64,
     },
+    LacpTick {
+        device: rios_simulator::DeviceId,
+    },
     DhcpProbe {
         interface: InterfaceRef,
         xid: u32,

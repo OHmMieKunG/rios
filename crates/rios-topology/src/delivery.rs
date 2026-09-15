@@ -210,6 +210,10 @@ impl Lab {
             return Ok(None);
         };
         let outcome = match scheduled.event {
+            SimulationEvent::LacpTick { device } => {
+                self.lacp_timer(device)?;
+                return Ok(None);
+            }
             SimulationEvent::TcpTick { device } => {
                 self.tcp_timer(device)?;
                 return Ok(None);
@@ -262,6 +266,9 @@ impl Lab {
                             .unwrap()
                             .record_frame(interface.interface, frame.len(), true)?;
                         self.trace_frame(interface, TraceAction::Rx, &frame);
+                        if self.handle_lacp_frame(interface, &frame)? {
+                            return Ok(Some(EventOutcome::FrameReceived { interface, frame }));
+                        }
                         let logical_interface = match self
                             .device(interface.device)?
                             .channel_ingress(interface.interface)

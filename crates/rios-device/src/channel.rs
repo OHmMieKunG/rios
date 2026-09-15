@@ -123,6 +123,7 @@ impl Device {
     /// Remove membership without deleting the logical interface.
     pub fn clear_channel_group(&mut self, interface: InterfaceId) -> Result<(), DeviceError> {
         self.config_mut(interface)?.channel_group = None;
+        self.lacp_neighbors.remove(&interface);
         Ok(())
     }
     /// Logical bundle associated with a physical member.
@@ -152,10 +153,10 @@ impl Device {
             .interfaces
             .iter()
             .filter_map(|(id, config)| {
-                (config
-                    .channel_group
-                    .is_some_and(|group| group.number == number && group.mode == ChannelMode::On)
-                    && config.switchport == self.running_config.interfaces[&logical].switchport
+                (config.channel_group.is_some_and(|group| {
+                    group.number == number
+                        && (group.mode == ChannelMode::On || self.lacp_distributing(*id))
+                }) && config.switchport == self.running_config.interfaces[&logical].switchport
                     && config.mtu == self.running_config.interfaces[&logical].mtu
                     && self.protocol_up(*id))
                 .then_some(*id)
