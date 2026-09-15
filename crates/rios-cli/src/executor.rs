@@ -117,9 +117,18 @@ pub fn execute_at(
             | VlanConfiguration(_)
             | RouterConfiguration(_)
             | DhcpPoolConfiguration(_)
+            | RouteMapConfiguration(..)
             | AccessListConfiguration(_, _)
     );
     let valid = match &command {
+        Command::SetPrefixList { .. }
+        | Command::RemovePrefixList { .. }
+        | Command::EnterRouteMap { .. }
+        | Command::RemoveRouteMap { .. } => mode == GlobalConfiguration,
+        Command::SetRouteMapMatch(_)
+        | Command::SetRouteMapLocalPreference(_)
+        | Command::SetRouteMapMetric(_)
+        | Command::SetRouteMapPrepend(_) => matches!(mode, RouteMapConfiguration(..)),
         Command::SetIpv6Routing(_) | Command::SetIpv6Route { .. } => mode == GlobalConfiguration,
         Command::SetIpv6Port(_) => matches!(
             mode,
@@ -421,6 +430,48 @@ pub fn execute_at(
             session.mode = VlanConfiguration(vlan);
         }
         Command::RemoveVlan(vlan) => device.remove_vlan(vlan)?,
+        Command::SetPrefixList {
+            name,
+            sequence,
+            entry,
+        } => {
+            device.set_prefix_list_entry(&name, sequence, entry)?;
+        }
+        Command::RemovePrefixList { name, sequence } => {
+            device.remove_prefix_list(&name, sequence)?
+        }
+        Command::EnterRouteMap {
+            name,
+            action,
+            sequence,
+        } => {
+            session.mode =
+                RouteMapConfiguration(device.ensure_route_map(&name, action, sequence)?, sequence);
+        }
+        Command::RemoveRouteMap { name, sequence } => device.remove_route_map(&name, sequence)?,
+        command @ (Command::SetRouteMapMatch(_)
+        | Command::SetRouteMapLocalPreference(_)
+        | Command::SetRouteMapMetric(_)
+        | Command::SetRouteMapPrepend(_)) => {
+            if let RouteMapConfiguration(id, sequence) = mode {
+                let mut entry = device
+                    .running_config()
+                    .routing_policy
+                    .route_maps
+                    .get(&id)
+                    .and_then(|map| map.entries.get(&sequence))
+                    .cloned()
+                    .ok_or(DeviceError::InvalidRoutingPolicy)?;
+                match command {
+                    Command::SetRouteMapMatch(names) => entry.prefix_lists = names,
+                    Command::SetRouteMapLocalPreference(value) => entry.local_preference = value,
+                    Command::SetRouteMapMetric(value) => entry.metric = value,
+                    Command::SetRouteMapPrepend(value) => entry.as_prepend = value,
+                    _ => {}
+                }
+                device.set_route_map_entry(id, sequence, entry)?;
+            }
+        }
         Command::BgpProcess { asn, present } => {
             if present {
                 device.set_bgp_process(Some(asn))?;
@@ -456,11 +507,42 @@ pub fn execute_at(
                             update_source: None,
                             next_hop_self: false,
                             route_reflector_client: false,
+                            inbound: Default::default(),
+                            outbound: Default::default(),
+                            default_originate: None,
                         })
                         .remote_as = remote_as;
                 }
                 let mut config = config.ok_or(DeviceError::InvalidBgpConfig)?;
+                let prefix_list_option = matches!(option, BgpNeighborOption::PrefixList { .. });
                 match option {
+                    BgpNeighborOption::DefaultOriginate(value) => config.default_originate = value,
+                    BgpNeighborOption::PrefixList {
+                        name,
+                        direction,
+                        present,
+                    }
+                    | BgpNeighborOption::RouteMap {
+                        name,
+                        direction,
+                        present,
+                    } => {
+                        let policy = if direction == AccessListDirection::In {
+                            &mut config.inbound
+                        } else {
+                            &mut config.outbound
+                        };
+                        let target = if prefix_list_option {
+                            &mut policy.prefix_list
+                        } else {
+                            &mut policy.route_map
+                        };
+                        if present {
+                            *target = Some(name);
+                        } else if target.as_ref() == Some(&name) {
+                            *target = None;
+                        }
+                    }
                     BgpNeighborOption::RouteReflectorClient(value) => {
                         config.route_reflector_client = value
                     }
@@ -767,6 +849,7 @@ pub fn execute_at(
             | VlanConfiguration(_)
             | RouterConfiguration(_)
             | DhcpPoolConfiguration(_)
+            | RouteMapConfiguration(..)
             | AccessListConfiguration(_, _) => session.mode = GlobalConfiguration,
         },
     }
@@ -798,6 +881,7 @@ pub fn load_configuration(device: &mut Device, text: &str) -> Result<(), CliErro
                 | CliMode::VlanConfiguration(_)
                 | CliMode::RouterConfiguration(_)
                 | CliMode::DhcpPoolConfiguration(_)
+                | CliMode::RouteMapConfiguration(..)
                 | CliMode::AccessListConfiguration(_, _)
         ) {
             return Err(fail("commands after end are not allowed".into()));
@@ -813,6 +897,7 @@ pub fn load_configuration(device: &mut Device, text: &str) -> Result<(), CliErro
                         | CliMode::VlanConfiguration(_)
                         | CliMode::RouterConfiguration(_)
                         | CliMode::DhcpPoolConfiguration(_)
+                        | CliMode::RouteMapConfiguration(..)
                         | CliMode::AccessListConfiguration(_, _)
                 ) {
                     crate::parser::parse_configuration(line, CliMode::GlobalConfiguration)

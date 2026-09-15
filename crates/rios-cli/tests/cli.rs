@@ -1222,7 +1222,7 @@ fn bgp_configuration_help_abbreviation_no_do_and_replay() {
         "ip add 192.0.2.1 255.255.255.255",
         "no shut",
         "exit",
-        "rou b 65001",
+        "router b 65001",
         "b r 1.1.1.1",
         "nei 10.0.0.2 rem 65002",
         "nei 10.0.0.2 up lo0",
@@ -1263,7 +1263,7 @@ fn bgp_configuration_help_abbreviation_no_do_and_replay() {
         "no b r",
         "no nei 10.0.0.2",
         "exit",
-        "no rou b 65001",
+        "no router b 65001",
     ] {
         run(&mut router, &mut session, input).unwrap();
     }
@@ -1294,10 +1294,119 @@ fn bgp_route_reflector_cli_validation_help_and_roundtrip() {
         parse("neighbor 10.0.0.2 r", session.mode),
         Err(ParseError::Ambiguous(_))
     ));
-    for input in ["no neighbor 10.0.0.2 route", "no bgp cl"] {
+    for input in ["no neighbor 10.0.0.2 route-r", "no bgp cl"] {
         run(&mut router, &mut session, input).unwrap();
     }
     let config = router.running_config().bgp.as_ref().unwrap();
     assert!(config.cluster_id.is_none());
     assert!(!config.neighbors[&"10.0.0.2".parse().unwrap()].route_reflector_client);
+}
+
+#[test]
+fn prefix_lists_route_maps_and_bgp_policy_replay_and_help() {
+    // Adding route-map makes rou ambiguous; never silently select router.
+    assert!(matches!(
+        parse("rou b 65000", CliMode::GlobalConfiguration),
+        Err(ParseError::Ambiguous(_))
+    ));
+    let mut router = Device::standalone();
+    let mut session = CliSession {
+        mode: CliMode::GlobalConfiguration,
+    };
+    for input in [
+        "ip pre TEN seq 5 deny 10.0.0.0/8 ge 25",
+        "ip pre TEN permit 10.0.0.0/8 ge 16 le 24",
+        "route-map IN permit 10",
+        "match ip add pre TEN",
+        "set loc 250",
+        "set met 42",
+        "set as pre 65001 65001",
+        "exit",
+        "route-map IN permit 20",
+        "exit",
+        "router bgp 65000",
+        "nei 10.0.0.2 rem 65001",
+        "nei 10.0.0.2 prefix TEN in",
+        "nei 10.0.0.2 route-m IN in",
+        "nei 10.0.0.2 route-m IN out",
+        "nei 10.0.0.2 def route-m IN",
+        "end",
+    ] {
+        run(&mut router, &mut session, input).unwrap();
+    }
+    let mut restored = Device::standalone();
+    load_configuration(&mut restored, &router.running_config().render()).unwrap();
+    assert_eq!(router.running_config(), restored.running_config());
+    let p = &router.running_config().routing_policy;
+    assert_eq!(p.prefix_lists["TEN"].len(), 2);
+    assert_eq!(
+        p.route_maps.values().next().unwrap().entries[&10].local_preference,
+        Some(250)
+    );
+    for (input, mode, expected) in [
+        (
+            "ip pre TEN seq ?",
+            CliMode::GlobalConfiguration,
+            "<sequence>",
+        ),
+        (
+            "ip pre TEN permit ?",
+            CliMode::GlobalConfiguration,
+            "<prefix/length>",
+        ),
+        ("route-map IN ?", CliMode::GlobalConfiguration, "permit"),
+        (
+            "neighbor 10.0.0.2 route-m IN ?",
+            CliMode::RouterConfiguration(RoutingProtocol::Bgp),
+            "out",
+        ),
+        (
+            "neighbor 10.0.0.2 default-originate ?",
+            CliMode::RouterConfiguration(RoutingProtocol::Bgp),
+            "route-map",
+        ),
+    ] {
+        let ParsedInput::Help(help) = parse(input, mode).unwrap() else {
+            panic!("help expected")
+        };
+        assert!(help.contains(expected), "{input}: {help}");
+    }
+    for input in [
+        "ip pre BAD permit 10.0.0.0/8 ge 8",
+        "ip pre BAD permit 10.0.0.0/8 le 33",
+        "ip pre BAD permit 10.0.0.0/8 ge 25 le 24",
+        "ip pre BAD seq 0 permit 0.0.0.0/0",
+    ] {
+        assert!(parse(input, CliMode::GlobalConfiguration).is_err());
+    }
+    for input in [
+        "conf t",
+        "route-map IN permit 10",
+        "no match ip address prefix-list",
+        "no set local",
+        "no set met",
+        "no set as pre",
+        "do sh ip b",
+        "exit",
+        "no route-map IN permit 20",
+        "no ip pre TEN seq 5",
+        "router bgp 65000",
+        "no nei 10.0.0.2 prefix TEN in",
+        "no nei 10.0.0.2 route-m IN out",
+        "no nei 10.0.0.2 def",
+        "end",
+    ] {
+        run(&mut router, &mut session, input).unwrap();
+    }
+    assert_eq!(
+        router.running_config().routing_policy.prefix_lists["TEN"].len(),
+        1
+    );
+    let peer =
+        &router.running_config().bgp.as_ref().unwrap().neighbors[&"10.0.0.2".parse().unwrap()];
+    assert!(
+        peer.inbound.prefix_list.is_none()
+            && peer.outbound.route_map.is_none()
+            && peer.default_originate.is_none()
+    );
 }

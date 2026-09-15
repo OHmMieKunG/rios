@@ -40,6 +40,17 @@ pub enum BgpNeighborOption {
     UpdateSource(Option<String>),
     NextHopSelf(bool),
     RouteReflectorClient(bool),
+    PrefixList {
+        name: String,
+        direction: AccessListDirection,
+        present: bool,
+    },
+    RouteMap {
+        name: String,
+        direction: AccessListDirection,
+        present: bool,
+    },
+    DefaultOriginate(Option<rios_config::BgpDefaultRoute>),
 }
 /// Routing configuration context reserved for later protocol implementation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +74,7 @@ pub enum CliMode {
     RouterConfiguration(RoutingProtocol),
     DhcpPoolConfiguration(DhcpPoolId),
     AccessListConfiguration(rios_config::AclId, rios_config::AclKind),
+    RouteMapConfiguration(rios_config::RouteMapId, u32),
 }
 /// Independent CLI session. Multiple sessions may reference the same device.
 #[derive(Debug, Clone, Default)]
@@ -82,6 +94,7 @@ impl CliSession {
             CliMode::VlanConfiguration(_) => "(config-vlan)#",
             CliMode::RouterConfiguration(_) => "(config-router)#",
             CliMode::DhcpPoolConfiguration(_) => "(dhcp-config)#",
+            CliMode::RouteMapConfiguration(..) => "(config-route-map)#",
             CliMode::AccessListConfiguration(_, kind) => {
                 if kind == rios_config::AclKind::Standard {
                     "(config-std-nacl)#"
@@ -104,6 +117,7 @@ impl CliSession {
                 | CliMode::RouterConfiguration(_)
                 | CliMode::DhcpPoolConfiguration(_)
                 | CliMode::AccessListConfiguration(_, _)
+                | CliMode::RouteMapConfiguration(..)
         ) {
             self.mode = CliMode::PrivilegedExec;
         }
@@ -137,6 +151,28 @@ pub enum DhcpPoolOption {
 /// Validated syntax, independent of state mutation and terminal I/O.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
+    SetPrefixList {
+        name: String,
+        sequence: Option<u32>,
+        entry: rios_config::PrefixListEntry,
+    },
+    RemovePrefixList {
+        name: String,
+        sequence: Option<u32>,
+    },
+    EnterRouteMap {
+        name: String,
+        action: AccessListAction,
+        sequence: u32,
+    },
+    RemoveRouteMap {
+        name: String,
+        sequence: Option<u32>,
+    },
+    SetRouteMapMatch(BTreeSet<String>),
+    SetRouteMapLocalPreference(Option<u32>),
+    SetRouteMapMetric(Option<u32>),
+    SetRouteMapPrepend(Vec<u32>),
     BgpProcess {
         asn: u32,
         present: bool,

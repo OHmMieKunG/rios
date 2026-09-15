@@ -27,13 +27,14 @@ impl Device {
         for peer in self.bgp_neighbors() {
             let _ = writeln!(
                 out,
-                "BGP neighbor is {}, remote AS {}\n  State {:?}, router ID {}\n  {} received prefixes, established for {} seconds",
+                "BGP neighbor is {}, remote AS {}\n  State {:?}, router ID {}\n  {} accepted / {} received prefixes, established for {} seconds",
                 peer.address,
                 peer.remote_as,
                 peer.state,
                 peer.router_id
                     .map_or_else(|| "unassigned".into(), |id| id.to_string()),
                 peer.prefixes,
+                peer.received_prefixes,
                 peer.established_since
                     .map_or(0, |since| now.0.saturating_sub(since.0) / 1_000_000)
             );

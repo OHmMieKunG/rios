@@ -2,7 +2,9 @@
 #![forbid(unsafe_code)]
 mod acl;
 mod bgp;
-pub use bgp::{BgpConfig, BgpNeighborConfig};
+mod route_policy;
+pub use bgp::{BgpConfig, BgpDefaultRoute, BgpNeighborConfig, BgpPolicy};
+pub use route_policy::{PrefixListEntry, RouteMap, RouteMapEntry, RouteMapId, RoutingPolicyConfig};
 mod ipv6;
 pub use ipv6::{Ipv6InterfacePolicy, Ipv6StaticRoute, OspfV3Binding, OspfV3Config};
 mod nat;
@@ -249,6 +251,8 @@ fn default_lease_seconds() -> u32 {
 /// Current structured configuration; runtime counters and carrier are separate.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunningConfig {
+    #[serde(default)]
+    pub routing_policy: RoutingPolicyConfig,
     #[serde(default)]
     pub bgp: Option<BgpConfig>,
     #[serde(default)]
@@ -591,6 +595,7 @@ impl RunningConfig {
             )
             .unwrap();
         }
+        out.push_str(&self.routing_policy.render());
         if let Some(bgp) = &self.bgp {
             bgp.render(&self.interfaces, &mut out);
         }

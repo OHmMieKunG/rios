@@ -6,10 +6,27 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     net::Ipv4Addr,
 };
+/// One direction's independent prefix filter and route-map attachment.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BgpPolicy {
+    pub prefix_list: Option<String>,
+    pub route_map: Option<String>,
+}
+/// Per-neighbor default advertisement, optionally conditioned on a route-map match in the RIB.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BgpDefaultRoute {
+    pub route_map: Option<String>,
+}
 /// A configured IPv4 unicast peer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BgpNeighborConfig {
     pub remote_as: u32,
+    #[serde(default)]
+    pub inbound: BgpPolicy,
+    #[serde(default)]
+    pub outbound: BgpPolicy,
+    #[serde(default)]
+    pub default_originate: Option<BgpDefaultRoute>,
     #[serde(default)]
     pub update_source: Option<InterfaceId>,
     #[serde(default)]
@@ -60,6 +77,21 @@ impl BgpConfig {
                 && let Some(port) = interfaces.get(&id)
             {
                 let _ = writeln!(out, " neighbor {address} update-source {}", port.name);
+            }
+            for (direction, policy) in [("in", &peer.inbound), ("out", &peer.outbound)] {
+                if let Some(name) = &policy.prefix_list {
+                    let _ = writeln!(out, " neighbor {address} prefix-list {name} {direction}");
+                }
+                if let Some(name) = &policy.route_map {
+                    let _ = writeln!(out, " neighbor {address} route-map {name} {direction}");
+                }
+            }
+            if let Some(default) = &peer.default_originate {
+                let _ = write!(out, " neighbor {address} default-originate");
+                if let Some(name) = &default.route_map {
+                    let _ = write!(out, " route-map {name}");
+                }
+                out.push('\n');
             }
             if peer.route_reflector_client {
                 let _ = writeln!(out, " neighbor {address} route-reflector-client");

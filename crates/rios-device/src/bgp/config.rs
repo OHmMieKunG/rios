@@ -73,7 +73,23 @@ impl Device {
             .as_mut()
             .ok_or(DeviceError::InvalidBgpConfig)?;
         if let Some(peer) = peer {
-            if peer.route_reflector_client && peer.remote_as != config.local_as {
+            let names = [
+                &peer.inbound.prefix_list,
+                &peer.inbound.route_map,
+                &peer.outbound.prefix_list,
+                &peer.outbound.route_map,
+            ];
+            if names
+                .into_iter()
+                .flatten()
+                .any(|name| !crate::route_policy::policy_name_valid(name))
+                || peer
+                    .default_originate
+                    .as_ref()
+                    .and_then(|d| d.route_map.as_ref())
+                    .is_some_and(|name| !crate::route_policy::policy_name_valid(name))
+                || peer.route_reflector_client && peer.remote_as != config.local_as
+            {
                 return Err(DeviceError::InvalidBgpConfig);
             }
             if config.neighbors.len() >= PEER_LIMIT && !config.neighbors.contains_key(&address) {

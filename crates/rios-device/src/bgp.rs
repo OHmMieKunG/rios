@@ -1,6 +1,7 @@
 //! BGP over the device's simulated TCP stack, with bounded sessions and received routes.
 mod config;
 mod display;
+mod policy;
 mod routes;
 mod transport;
 use crate::*;
@@ -25,6 +26,7 @@ pub struct BgpNeighborInfo {
     pub router_id: Option<Ipv4Addr>,
     pub state: BgpState,
     pub prefixes: usize,
+    pub received_prefixes: usize,
     pub established_since: Option<SimTime>,
     pub last_error: Option<BgpError>,
 }
@@ -84,6 +86,7 @@ struct Peer {
     streams: BTreeMap<TcpSocket, Stream>,
     selected: Option<TcpSocket>,
     received: BTreeMap<Ipv4Network, BgpAttributes>,
+    accepted: usize,
     retry_at: SimTime,
     state: BgpState,
     last_error: Option<BgpError>,
@@ -95,6 +98,7 @@ impl Peer {
             streams: BTreeMap::new(),
             selected: None,
             received: BTreeMap::new(),
+            accepted: 0,
             retry_at: now,
             state: BgpState::Idle,
             last_error: None,
@@ -128,7 +132,8 @@ impl Device {
                     remote_as: p.config.remote_as,
                     router_id: selected.and_then(|s| s.fsm.peer_router_id),
                     state: selected.map_or(p.state, |s| s.fsm.state),
-                    prefixes: p.received.len(),
+                    prefixes: p.accepted,
+                    received_prefixes: p.received.len(),
                     established_since: selected.and_then(|s| s.fsm.established_since),
                     last_error: p.last_error,
                 }

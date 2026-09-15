@@ -1,9 +1,22 @@
 mod bgp;
 mod ospfv3;
+mod route_policy;
 use crate::CliMode;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Action {
+    PrefixList,
+    NoPrefixList,
+    RouteMap,
+    NoRouteMap,
+    RouteMapMatch,
+    NoRouteMapMatch,
+    RouteMapLocalPref,
+    NoRouteMapLocalPref,
+    RouteMapMetric,
+    NoRouteMapMetric,
+    RouteMapPrepend,
+    NoRouteMapPrepend,
     RouterBgp,
     NoRouterBgp,
     BgpRouterId,
@@ -488,6 +501,7 @@ pub(crate) fn tree(mode: CliMode) -> Node {
         | CliMode::VlanConfiguration(_)
         | CliMode::RouterConfiguration(_)
         | CliMode::DhcpPoolConfiguration(_)
+        | CliMode::RouteMapConfiguration(..)
         | CliMode::AccessListConfiguration(_, _) => {
             root.add(&[("end", "Return to privileged EXEC")], End);
             root.add(&[("do", "Execute an EXEC command")], Do);
@@ -1092,5 +1106,6 @@ pub(crate) fn tree(mode: CliMode) -> Node {
     }
     ospfv3::add(&mut root, mode);
     bgp::add(&mut root, mode);
+    route_policy::add(&mut root, mode);
     root
 }

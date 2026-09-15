@@ -8,17 +8,7 @@ impl Device {
             if rib.routes().iter().any(|r| r.prefix == *prefix) {
                 candidates.entry(*prefix).or_default().push(BgpPath {
                     prefix: *prefix,
-                    attributes: BgpAttributes {
-                        origin: BgpOrigin::Igp,
-                        as_path: Vec::new(),
-                        next_hop: Ipv4Addr::UNSPECIFIED,
-                        atomic_aggregate: false,
-                        med: None,
-                        local_preference: Some(100),
-                        originator_id: None,
-                        cluster_list: Vec::new(),
-                        unknown_transitive: Vec::new(),
-                    },
+                    attributes: policy::local_attributes(Ipv4Addr::UNSPECIFIED),
                     learned_from: None,
                     peer_router_id: router_id,
                     external: false,
@@ -26,6 +16,7 @@ impl Device {
                 });
             }
         }
+        let mut accepted = BTreeMap::<Ipv4Addr, usize>::new();
         for (address, peer) in &self.bgp.peers {
             let Some(stream) = peer
                 .selected
@@ -37,7 +28,16 @@ impl Device {
             let Some(peer_router_id) = stream.fsm.peer_router_id else {
                 continue;
             };
-            for (prefix, attributes) in &peer.received {
+            for (prefix, raw) in &peer.received {
+                let Some(attributes) = policy::apply(
+                    &self.running_config.routing_policy,
+                    &peer.config.inbound,
+                    *prefix,
+                    raw.clone(),
+                ) else {
+                    continue;
+                };
+                *accepted.entry(*address).or_default() += 1;
                 if attributes.originator_id == Some(router_id)
                     || attributes
                         .cluster_list
@@ -55,13 +55,16 @@ impl Device {
                 }
                 candidates.entry(*prefix).or_default().push(BgpPath {
                     prefix: *prefix,
-                    attributes: attributes.clone(),
+                    attributes,
                     learned_from: Some(*address),
                     peer_router_id,
                     external: peer.config.remote_as != config.local_as,
                     igp_cost: route.metric,
                 });
             }
+        }
+        for (address, peer) in &mut self.bgp.peers {
+            peer.accepted = accepted.get(address).copied().unwrap_or(0);
         }
         self.bgp.best = candidates
             .into_iter()
@@ -86,6 +89,13 @@ impl Device {
             .collect();
     }
     pub(super) fn bgp_advertise(&mut self, config: &BgpConfig, router_id: Ipv4Addr, now: SimTime) {
+        let prefixes: Vec<_> = self
+            .routing_table()
+            .routes()
+            .iter()
+            .map(|r| r.prefix)
+            .collect();
+        let policies = &self.running_config.routing_policy;
         for (address, peer) in &mut self.bgp.peers {
             let Some(socket) = peer.selected else {
                 continue;
@@ -122,13 +132,6 @@ impl Device {
                         .insert(0, config.cluster_id.unwrap_or(router_id));
                 }
                 if external {
-                    if attributes.contains_as(peer.config.remote_as) {
-                        continue;
-                    }
-                    if attributes.prepend(&[config.local_as]).is_err() {
-                        continue;
-                    }
-                    attributes.local_preference = None;
                     attributes.originator_id = None;
                     attributes.cluster_list.clear();
                     if path.learned_from.is_some() {
@@ -143,10 +146,42 @@ impl Device {
                 {
                     attributes.next_hop = socket.local_address;
                 }
+                let Some(mut attributes) =
+                    policy::apply(policies, &peer.config.outbound, *prefix, attributes)
+                else {
+                    continue;
+                };
+                if external {
+                    if attributes.contains_as(peer.config.remote_as)
+                        || attributes.prepend(&[config.local_as]).is_err()
+                    {
+                        continue;
+                    }
+                    attributes.local_preference = None;
+                }
                 for unknown in &mut attributes.unknown_transitive {
                     unknown.flags |= 0x20;
                 }
                 desired.insert(*prefix, attributes);
+            }
+            if let Some(default) = &peer.config.default_originate {
+                let mut attributes = policy::local_attributes(socket.local_address);
+                let permitted = if let Some(name) = &default.route_map {
+                    prefixes
+                        .iter()
+                        .find_map(|p| policies.route_map_match(name, *p))
+                        .is_some_and(|entry| policy::set_attributes(entry, &mut attributes))
+                } else {
+                    true
+                };
+                if permitted && (!external || attributes.prepend(&[config.local_as]).is_ok()) {
+                    if external {
+                        attributes.local_preference = None;
+                    }
+                    if let Ok(prefix) = Ipv4Network::new(Ipv4Addr::UNSPECIFIED, 0) {
+                        desired.insert(prefix, attributes);
+                    }
+                }
             }
             let withdrawn: Vec<_> = stream
                 .advertised

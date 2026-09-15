@@ -91,6 +91,9 @@ pub(super) fn options(action: Action, args: &[Token<'_>]) -> Result<ospf::Option
                 "update-source",
                 "next-hop-self",
                 "route-reflector-client",
+                "prefix-list",
+                "route-map",
+                "default-originate",
             ];
             let Some(token) = args.get(1) else {
                 if present {
@@ -108,6 +111,58 @@ pub(super) fn options(action: Action, args: &[Token<'_>]) -> Result<ospf::Option
             };
             let word = unique_choice(token, &choices)?;
             let option = match word {
+                "prefix-list" | "route-map" => {
+                    let Some(name) = args.get(2) else {
+                        return pending(vec!["<name>"]);
+                    };
+                    let Some(dir) = args.get(3) else {
+                        return pending(vec!["in", "out"]);
+                    };
+                    let direction = if unique_choice(dir, &["in", "out"])? == "in" {
+                        AccessListDirection::In
+                    } else {
+                        AccessListDirection::Out
+                    };
+                    exact(4)?;
+                    if word == "prefix-list" {
+                        BgpNeighborOption::PrefixList {
+                            name: name.text.into(),
+                            direction,
+                            present,
+                        }
+                    } else {
+                        BgpNeighborOption::RouteMap {
+                            name: name.text.into(),
+                            direction,
+                            present,
+                        }
+                    }
+                }
+                "default-originate" => {
+                    let route_map = if let Some(token) = args.get(2) {
+                        unique_choice(token, &["route-map"])?;
+                        let Some(name) = args.get(3) else {
+                            return pending(vec!["<name>"]);
+                        };
+                        Some(name.text.into())
+                    } else {
+                        None
+                    };
+                    exact(4)?;
+                    return Ok(ospf::Options {
+                        command: Some(Command::SetBgpNeighbor {
+                            address,
+                            option: BgpNeighborOption::DefaultOriginate(
+                                present.then_some(rios_config::BgpDefaultRoute { route_map }),
+                            ),
+                        }),
+                        choices: if args.len() == 2 {
+                            vec!["<cr>", "route-map"]
+                        } else {
+                            vec!["<cr>"]
+                        },
+                    });
+                }
                 "route-reflector-client" => {
                     exact(2)?;
                     BgpNeighborOption::RouteReflectorClient(present)

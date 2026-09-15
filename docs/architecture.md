@@ -551,8 +551,7 @@ or 200. `network ... mask ...` requires an exact non-BGP route before originatin
 
 Limits: 256 peers/device, two collision candidates/peer, 4096 received
 prefixes/peer, 4096 selected prefixes/device, 8192 framing bytes/stream and 32
-queued messages/stream. Backpressure defers export while TCP is busy. Policy maps,
-prefix lists and default-originate remain the next BGP roadmap work. IPv6 AFI/SAFI, graceful restart,
+queued messages/stream. Backpressure defers export while TCP is busy. IPv6 AFI/SAFI, graceful restart,
 ADD-PATH, extended messages and legacy AS4_PATH reconstruction are not supported.
 RIOS peers advertise four-octet ASN capability. Codecs follow public
 [RFC 4271](https://datatracker.ietf.org/doc/html/rfc4271) and
@@ -572,3 +571,24 @@ suppressed. Reflected UPDATEs carry ORIGINATOR_ID and a prepended CLUSTER_LIST.
 default. Originator and cluster loops are rejected. Reflection preserves
 NEXT_HOP, including when ordinary `next-hop-self` is configured. Client policy
 edits recalculate export and issue real withdrawals without resetting TCP.
+
+Routing policy is structured in `RoutingPolicyConfig`. Ordered `ip prefix-list`
+entries support sequences, permit/deny and ge/le prefix lengths. Route-map
+clauses match any permitted named prefix list and set local preference, MED or
+AS prepends; first matching clause wins, with implicit deny. Missing attached
+policies also deny. Each device permits 256 prefix lists/maps and 4096 entries
+per list/map; a prepend statement is limited to 64 ASNs.
+
+BGP peers attach independent inbound/outbound prefix lists and route maps. Raw
+accepted wire updates remain separate from policy-derived paths, allowing edits
+to recalculate selection and send updates/withdrawals without resetting sessions.
+Operational peer detail distinguishes received and accepted prefix counts.
+`neighbor ... default-originate` advertises a default independently of ordinary
+outbound filters. Its optional route map requires a matching route in the RIB
+and supplies the generated default's attributes. It does not install a local
+default route. Prefix-list deletion by sequence, route-map clause deletion and
+all implemented match/set/neighbor policy `no` forms use the same device APIs.
+Route-map matches currently cover IPv4 prefix lists only; community, AS-path
+regular expressions, policy-based packet forwarding and route-map `continue`
+are not claimed. Public behavior reference:
+[Cisco BGP command reference](https://www.cisco.com/c/en/us/td/docs/ios-xml/ios/iproute_bgp/command/irg-cr-book/bgp-m1.html).

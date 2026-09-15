@@ -1,0 +1,53 @@
+connect R1
+enable
+configure terminal
+interface gi0/0
+ip address 10.0.12.1 255.255.255.0
+no shutdown
+interface lo0
+ip address 192.0.2.1 255.255.255.255
+no shutdown
+exit
+route-map IN permit 10
+set local-preference 250
+exit
+router bgp 65001
+bgp router-id 1.1.1.1
+neighbor 10.0.12.2 remote-as 65002
+neighbor 10.0.12.2 route-map IN in
+network 192.0.2.1 mask 255.255.255.255
+end
+exit
+connect R2
+enable
+configure terminal
+interface gi0/0
+ip address 10.0.12.2 255.255.255.0
+no shutdown
+interface lo0
+ip address 192.0.2.2 255.255.255.255
+no shutdown
+exit
+ip prefix-list LOOPBACK permit 192.0.2.2/32
+route-map EXPORT permit 10
+match ip address prefix-list LOOPBACK
+set metric 25
+set as-path prepend 65002 65002
+exit
+router bgp 65002
+bgp router-id 2.2.2.2
+neighbor 10.0.12.1 remote-as 65001
+neighbor 10.0.12.1 route-map EXPORT out
+network 192.0.2.2 mask 255.255.255.255
+end
+exit
+run 5000
+connect R1
+enable
+show ip bgp summary
+show ip bgp neighbors
+show ip bgp
+show ip route
+ping 192.0.2.2
+exit
+exit

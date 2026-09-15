@@ -4,6 +4,7 @@ mod dhcp;
 mod ipv6;
 mod nat;
 mod ospf;
+mod route_policy;
 use crate::{
     tree::{Action, Node, tree},
     *,
@@ -185,6 +186,27 @@ fn parse_input(
                 .ok_or(ParseError::Incomplete)?,
         ));
     }
+    if matches!(
+        action,
+        Action::PrefixList
+            | Action::NoPrefixList
+            | Action::RouteMap
+            | Action::NoRouteMap
+            | Action::RouteMapMatch
+            | Action::NoRouteMapMatch
+            | Action::RouteMapLocalPref
+            | Action::NoRouteMapLocalPref
+            | Action::RouteMapMetric
+            | Action::NoRouteMapMetric
+            | Action::RouteMapPrepend
+            | Action::NoRouteMapPrepend
+    ) {
+        return Ok(ParsedInput::Command(
+            route_policy::options(action, args)?
+                .command
+                .ok_or(ParseError::Incomplete)?,
+        ));
+    }
     let expected = match action {
         Action::Ipv6Address
         | Action::NoIpv6Address
@@ -276,6 +298,11 @@ fn parse_input(
     };
     use Action::*;
     let command = match action {
+        PrefixList | NoPrefixList | RouteMap | NoRouteMap | RouteMapMatch | NoRouteMapMatch
+        | RouteMapLocalPref | NoRouteMapLocalPref | RouteMapMetric | NoRouteMapMetric
+        | RouteMapPrepend | NoRouteMapPrepend => route_policy::options(action, args)?
+            .command
+            .ok_or(ParseError::Incomplete)?,
         BgpClusterId | NoBgpClusterId | RouterBgp | NoRouterBgp | BgpRouterId | NoBgpRouterId
         | BgpNetwork | NoBgpNetwork | BgpNeighbor | NoBgpNeighbor => bgp::options(action, args)?
             .command
@@ -995,6 +1022,23 @@ pub fn suggestions(
     }
     if let Some(action) = node.action {
         let args = &complete[used..];
+        if matches!(
+            action,
+            Action::PrefixList
+                | Action::NoPrefixList
+                | Action::RouteMap
+                | Action::NoRouteMap
+                | Action::RouteMapMatch
+                | Action::NoRouteMapMatch
+                | Action::RouteMapLocalPref
+                | Action::NoRouteMapLocalPref
+                | Action::RouteMapMetric
+                | Action::NoRouteMapMetric
+                | Action::RouteMapPrepend
+                | Action::NoRouteMapPrepend
+        ) {
+            return route_policy::suggest(action, args, partial, start);
+        }
         if matches!(
             action,
             Action::RouterBgp

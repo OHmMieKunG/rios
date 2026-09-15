@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 mod acl;
 mod bgp;
+mod route_policy;
 pub use bgp::BgpNeighborInfo;
 mod ospfv3;
 pub use ospfv3::{OspfV3NeighborInfo, OspfV3Transmission};
@@ -180,6 +181,8 @@ struct StpInstance {
 pub enum DeviceError {
     #[error("invalid BGP process, peer, or routing policy")]
     InvalidBgpConfig,
+    #[error("invalid routing policy name, sequence, rule, or capacity")]
+    InvalidRoutingPolicy,
     #[error("invalid spanning-tree priority, cost, or port policy")]
     InvalidSpanningTree,
     #[error("invalid EtherChannel member or incompatible port configuration")]
@@ -296,6 +299,7 @@ impl Device {
             ospfv3: ospfv3::OspfV3Runtime::default(),
             running_config: RunningConfig {
                 bgp: None,
+                routing_policy: Default::default(),
                 ospfv3: None,
                 ipv6_unicast_routing: false,
                 ipv6_static_routes: BTreeSet::new(),

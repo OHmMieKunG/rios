@@ -30,6 +30,9 @@ fn peer(lab: &mut Lab, name: &str, asn: u32, remote: &str, remote_as: u32) {
                 update_source: None,
                 next_hop_self: false,
                 route_reflector_client: false,
+                inbound: Default::default(),
+                outbound: Default::default(),
+                default_originate: None,
             }),
         )
         .unwrap();
@@ -443,4 +446,288 @@ fn route_reflector_exchanges_client_routes_and_rejects_cluster_loops() {
     .unwrap();
     lab.run_until(SimTime::from_millis(10_000)).unwrap();
     assert!(!lab.device(r3).unwrap().bgp_paths().contains_key(&p1));
+}
+
+fn policy(
+    lab: &mut Lab,
+    name: &str,
+    map: &str,
+    edit: impl FnOnce(&mut rios_config::RouteMapEntry),
+) {
+    let id = lab.device_id(name).unwrap();
+    lab.with_device_mut(id, |d| {
+        let id = d
+            .ensure_route_map(map, rios_config::AccessListAction::Permit, 10)
+            .unwrap();
+        let mut entry = d.running_config().routing_policy.route_maps[&id].entries[&10].clone();
+        edit(&mut entry);
+        d.set_route_map_entry(id, 10, entry).unwrap();
+    })
+    .unwrap();
+}
+fn neighbor_edit(
+    lab: &mut Lab,
+    name: &str,
+    remote: &str,
+    edit: impl FnOnce(&mut BgpNeighborConfig),
+) {
+    let id = lab.device_id(name).unwrap();
+    let address = remote.parse().unwrap();
+    lab.with_device_mut(id, |d| {
+        let mut peer = d.running_config().bgp.as_ref().unwrap().neighbors[&address].clone();
+        edit(&mut peer);
+        d.set_bgp_neighbor(address, Some(peer)).unwrap();
+    })
+    .unwrap();
+}
+#[test]
+fn bgp_route_maps_change_best_path_using_local_preference_med_and_as_prepend() {
+    let mut lab = chain();
+    address(&mut lab, "R1:lo0", "192.0.2.100", 32);
+    address(&mut lab, "R3:lo0", "192.0.2.100", 32);
+    let prefix = Ipv4Network::new("192.0.2.100".parse().unwrap(), 32).unwrap();
+    for (name, asn, remote, remote_as) in [
+        ("R1", 65001, "10.0.12.2", 65000),
+        ("R2", 65000, "10.0.12.1", 65001),
+        ("R2", 65000, "10.0.23.3", 65001),
+        ("R3", 65001, "10.0.23.2", 65000),
+    ] {
+        peer(&mut lab, name, asn, remote, remote_as);
+    }
+    for (name, remote, med) in [("R1", "10.0.12.2", 20), ("R3", "10.0.23.2", 30)] {
+        let id = lab.device_id(name).unwrap();
+        lab.with_device_mut(id, |d| d.set_bgp_network(prefix, true).unwrap())
+            .unwrap();
+        policy(&mut lab, name, "OUT", |e| e.metric = Some(med));
+        neighbor_edit(&mut lab, name, remote, |p| {
+            p.outbound.route_map = Some("OUT".into())
+        });
+    }
+    let r2 = lab.device_id("R2").unwrap();
+    let selected = |lab: &Lab| {
+        lab.device(r2).unwrap().bgp_paths()[&prefix]
+            .learned_from
+            .unwrap()
+            .to_string()
+    };
+    lab.run_until(SimTime::from_millis(5000)).unwrap();
+    assert_eq!(selected(&lab), "10.0.12.1");
+    let since = lab
+        .device(r2)
+        .unwrap()
+        .bgp_neighbors()
+        .iter()
+        .map(|p| p.established_since)
+        .collect::<Vec<_>>();
+    policy(&mut lab, "R2", "IN", |e| e.local_preference = Some(250));
+    neighbor_edit(&mut lab, "R2", "10.0.23.3", |p| {
+        p.inbound.route_map = Some("IN".into())
+    });
+    lab.run_until(SimTime::from_millis(8000)).unwrap();
+    assert_eq!(selected(&lab), "10.0.23.3");
+    assert_eq!(
+        lab.device(r2).unwrap().bgp_paths()[&prefix]
+            .attributes
+            .local_preference,
+        Some(250)
+    );
+    policy(&mut lab, "R2", "IN", |e| e.local_preference = None);
+    policy(&mut lab, "R3", "OUT", |e| e.metric = Some(10));
+    lab.run_until(SimTime::from_millis(10_000)).unwrap();
+    assert_eq!(selected(&lab), "10.0.23.3");
+    policy(&mut lab, "R3", "OUT", |e| e.as_prepend = vec![65001, 65001]);
+    let events = lab.run_until(SimTime::from_millis(12_000)).unwrap();
+    assert_eq!(selected(&lab), "10.0.12.1");
+    assert!(events.iter().any(|e| {
+        let EventOutcome::FrameReceived { frame, .. } = e else {
+            return false;
+        };
+        let Ok(ip) = Ipv4Packet::decode(&frame.payload) else {
+            return false;
+        };
+        let Ok(tcp) = TcpSegment::decode(ip.source, ip.destination, &ip.payload) else {
+            return false;
+        };
+        let Ok(BgpMessage::Update(update)) = BgpMessage::decode(&tcp.payload, true) else {
+            return false;
+        };
+        update
+            .attributes
+            .is_some_and(|a| a.path_length() == 3 && a.med == Some(10))
+    }));
+    assert_eq!(
+        since,
+        lab.device(r2)
+            .unwrap()
+            .bgp_neighbors()
+            .iter()
+            .map(|p| p.established_since)
+            .collect::<Vec<_>>()
+    );
+}
+#[test]
+fn prefix_filter_changes_withdraw_routes_and_conditional_default_uses_real_rib() {
+    use rios_config::{AccessListAction, BgpDefaultRoute, PrefixListEntry};
+    let mut lab = pair();
+    let r1 = lab.device_id("R1").unwrap();
+    let r2 = lab.device_id("R2").unwrap();
+    let network = Ipv4Network::new("192.0.2.2".parse().unwrap(), 32).unwrap();
+    let default = Ipv4Network::new("0.0.0.0".parse().unwrap(), 0).unwrap();
+    neighbor_edit(&mut lab, "R2", "10.0.0.1", |p| {
+        p.outbound.prefix_list = Some("EXPORT".into())
+    });
+    lab.run_until(SimTime::from_millis(5000)).unwrap();
+    assert!(!lab.device(r1).unwrap().bgp_paths().contains_key(&network));
+    lab.with_device_mut(r2, |d| {
+        d.set_prefix_list_entry(
+            "EXPORT",
+            Some(10),
+            PrefixListEntry {
+                action: AccessListAction::Permit,
+                prefix: network,
+                ge: None,
+                le: None,
+            },
+        )
+        .unwrap();
+    })
+    .unwrap();
+    lab.run_until(SimTime::from_millis(7000)).unwrap();
+    assert!(lab.device(r1).unwrap().bgp_paths().contains_key(&network));
+    lab.with_device_mut(r2, |d| {
+        d.set_prefix_list_entry(
+            "EXPORT",
+            Some(5),
+            PrefixListEntry {
+                action: AccessListAction::Deny,
+                prefix: network,
+                ge: None,
+                le: None,
+            },
+        )
+        .unwrap();
+    })
+    .unwrap();
+    neighbor_edit(&mut lab, "R2", "10.0.0.1", |p| {
+        p.default_originate = Some(BgpDefaultRoute::default())
+    });
+    lab.run_until(SimTime::from_millis(9000)).unwrap();
+    assert!(!lab.device(r1).unwrap().bgp_paths().contains_key(&network));
+    assert!(
+        lab.device(r1).unwrap().bgp_paths().contains_key(&default),
+        "per-neighbor default bypasses ordinary outbound prefix filter"
+    );
+    policy(&mut lab, "R2", "DEFAULT", |e| {
+        e.prefix_lists.insert("CONDITION".into());
+        e.metric = Some(77);
+    });
+    neighbor_edit(&mut lab, "R2", "10.0.0.1", |p| {
+        p.default_originate = Some(BgpDefaultRoute {
+            route_map: Some("DEFAULT".into()),
+        })
+    });
+    lab.run_until(SimTime::from_millis(11_000)).unwrap();
+    assert!(!lab.device(r1).unwrap().bgp_paths().contains_key(&default));
+    lab.with_device_mut(r2, |d| {
+        d.set_prefix_list_entry(
+            "CONDITION",
+            Some(5),
+            PrefixListEntry {
+                action: AccessListAction::Permit,
+                prefix: network,
+                ge: None,
+                le: None,
+            },
+        )
+        .unwrap();
+    })
+    .unwrap();
+    lab.run_until(SimTime::from_millis(13_000)).unwrap();
+    assert_eq!(
+        lab.device(r1).unwrap().bgp_paths()[&default].attributes.med,
+        Some(77)
+    );
+    let loopback = lab.endpoint("R2:lo0").unwrap();
+    lab.with_device_mut(r2, |d| {
+        d.set_admin_state(loopback.interface, AdminState::Down)
+            .unwrap()
+    })
+    .unwrap();
+    lab.run_until(SimTime::from_millis(15_000)).unwrap();
+    assert!(!lab.device(r1).unwrap().bgp_paths().contains_key(&default));
+    neighbor_edit(&mut lab, "R2", "10.0.0.1", |p| {
+        p.default_originate = Some(BgpDefaultRoute::default())
+    });
+    neighbor_edit(&mut lab, "R1", "10.0.0.2", |p| {
+        p.inbound.prefix_list = Some("DEFAULT-IN".into())
+    });
+    lab.run_until(SimTime::from_millis(17_000)).unwrap();
+    assert!(!lab.device(r1).unwrap().bgp_paths().contains_key(&default));
+    assert_eq!(
+        lab.device(r1).unwrap().bgp_neighbors()[0].received_prefixes,
+        1
+    );
+    assert_eq!(lab.device(r1).unwrap().bgp_neighbors()[0].prefixes, 0);
+    lab.with_device_mut(r1, |d| {
+        d.set_prefix_list_entry(
+            "DEFAULT-IN",
+            None,
+            PrefixListEntry {
+                action: AccessListAction::Permit,
+                prefix: default,
+                ge: None,
+                le: None,
+            },
+        )
+        .unwrap();
+    })
+    .unwrap();
+    lab.run_until(SimTime::from_millis(19_000)).unwrap();
+    assert!(lab.device(r1).unwrap().bgp_paths().contains_key(&default));
+    assert_eq!(lab.device(r1).unwrap().bgp_neighbors()[0].prefixes, 1);
+}
+
+#[test]
+fn received_as_loop_is_rejected_without_resetting_the_session() {
+    let mut lab = pair();
+    lab.run_until(SimTime::from_millis(5000)).unwrap();
+    let r1 = lab.device_id("R1").unwrap();
+    let r2 = lab.device_id("R2").unwrap();
+    let socket = *lab
+        .device(r2)
+        .unwrap()
+        .tcp_connections()
+        .iter()
+        .find(|(_, c)| c.state == rios_device::TcpState::Established)
+        .unwrap()
+        .0;
+    let mut attributes = lab
+        .device(r1)
+        .unwrap()
+        .bgp_paths()
+        .values()
+        .find(|p| p.learned_from.is_some())
+        .unwrap()
+        .attributes
+        .clone();
+    attributes.as_path = vec![rios_routing::AsPathSegment::Sequence(vec![65002, 65001])];
+    let prefix = Ipv4Network::new("192.0.2.99".parse().unwrap(), 32).unwrap();
+    let update = BgpMessage::Update(rios_routing::BgpUpdate {
+        withdrawn: Vec::new(),
+        attributes: Some(attributes),
+        announced: vec![prefix],
+    })
+    .encode(true)
+    .unwrap();
+    lab.tcp_send(r2, socket, &update).unwrap();
+    lab.run_until(SimTime::from_millis(6000)).unwrap();
+    assert!(!lab.device(r1).unwrap().bgp_paths().contains_key(&prefix));
+    assert_eq!(
+        lab.device(r1).unwrap().bgp_neighbors()[0].state,
+        BgpState::Established
+    );
+    assert_eq!(
+        lab.device(r1).unwrap().bgp_neighbors()[0].received_prefixes,
+        1
+    );
 }
