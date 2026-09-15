@@ -24,9 +24,14 @@ pub enum LinkState {
 }
 
 mod link;
+mod qos;
 mod queue;
 pub use link::{
     Admission, Bandwidth, DirectionalLinkRuntime, LinkConfig, LinkCounters, SimulationRng,
+};
+pub use qos::{
+    QosClassCounters, QosDeparture, QosScheduler, QueueClassConfig, QueueRejectReason,
+    QueueRejected, RateLimit,
 };
 pub use queue::{EventQueue, ScheduleError, ScheduledEvent, SimTime};
 
