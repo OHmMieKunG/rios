@@ -37,6 +37,10 @@ impl Link {
 /// Concrete internal events scheduled by the lab, with owned frame payloads.
 #[derive(Debug)]
 pub(crate) enum SimulationEvent {
+    BgpTimer {
+        device: rios_simulator::DeviceId,
+        generation: u64,
+    },
     Ipv6Timer {
         device: rios_simulator::DeviceId,
         generation: u64,

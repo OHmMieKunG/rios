@@ -1,6 +1,8 @@
 //! Device inventory and validated state transitions, independent of CLI syntax.
 #![forbid(unsafe_code)]
 mod acl;
+mod bgp;
+pub use bgp::BgpNeighborInfo;
 mod ospfv3;
 pub use ospfv3::{OspfV3NeighborInfo, OspfV3Transmission};
 mod ipv6;
@@ -129,6 +131,7 @@ pub struct Interface {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Device {
     ipv6: ipv6::Ipv6Runtime,
+    bgp: bgp::BgpRuntime,
     ospfv3: ospfv3::OspfV3Runtime,
     stp_errdisabled: BTreeSet<InterfaceId>,
     lacp_neighbors: BTreeMap<InterfaceId, LacpNeighbor>,
@@ -175,6 +178,8 @@ struct StpInstance {
 /// Rejected state changes leave the device unchanged.
 #[derive(Debug, thiserror::Error)]
 pub enum DeviceError {
+    #[error("invalid BGP process, peer, or routing policy")]
+    InvalidBgpConfig,
     #[error("invalid spanning-tree priority, cost, or port policy")]
     InvalidSpanningTree,
     #[error("invalid EtherChannel member or incompatible port configuration")]
@@ -287,8 +292,10 @@ impl Device {
             device_type,
             interfaces: BTreeMap::new(),
             ipv6: ipv6::Ipv6Runtime::default(),
+            bgp: bgp::BgpRuntime::default(),
             ospfv3: ospfv3::OspfV3Runtime::default(),
             running_config: RunningConfig {
+                bgp: None,
                 ospfv3: None,
                 ipv6_unicast_routing: false,
                 ipv6_static_routes: BTreeSet::new(),

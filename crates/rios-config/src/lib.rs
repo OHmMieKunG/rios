@@ -1,6 +1,8 @@
 //! Structured configuration and deterministic IOS-style rendering.
 #![forbid(unsafe_code)]
 mod acl;
+mod bgp;
+pub use bgp::{BgpConfig, BgpNeighborConfig};
 mod ipv6;
 pub use ipv6::{Ipv6InterfacePolicy, Ipv6StaticRoute, OspfV3Binding, OspfV3Config};
 mod nat;
@@ -247,6 +249,8 @@ fn default_lease_seconds() -> u32 {
 /// Current structured configuration; runtime counters and carrier are separate.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunningConfig {
+    #[serde(default)]
+    pub bgp: Option<BgpConfig>,
     #[serde(default)]
     pub ospfv3: Option<OspfV3Config>,
     #[serde(default)]
@@ -586,6 +590,9 @@ impl RunningConfig {
                 interface.name
             )
             .unwrap();
+        }
+        if let Some(bgp) = &self.bgp {
+            bgp.render(&self.interfaces, &mut out);
         }
         if let Some(ospf) = &self.ospfv3 {
             let _ = writeln!(out, "ipv6 router ospf {}", ospf.process_id);

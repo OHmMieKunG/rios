@@ -1210,3 +1210,65 @@ fn ospfv3_commands_abbreviate_explain_arguments_and_replay_structured_state() {
         rios_config::OspfInterfaceConfig::default()
     );
 }
+
+#[test]
+fn bgp_configuration_help_abbreviation_no_do_and_replay() {
+    let mut router = Device::standalone();
+    let mut session = CliSession::default();
+    for input in [
+        "en",
+        "conf t",
+        "int lo0",
+        "ip add 192.0.2.1 255.255.255.255",
+        "no shut",
+        "exit",
+        "rou b 65001",
+        "b r 1.1.1.1",
+        "nei 10.0.0.2 rem 65002",
+        "nei 10.0.0.2 up lo0",
+        "nei 10.0.0.2 next",
+        "net 192.0.2.1 m 255.255.255.255",
+    ] {
+        run(&mut router, &mut session, input).unwrap();
+    }
+    let bgp = router.running_config().bgp.as_ref().unwrap();
+    assert_eq!(bgp.local_as, 65001);
+    assert!(bgp.neighbors[&"10.0.0.2".parse().unwrap()].next_hop_self);
+    assert_eq!(bgp.networks.len(), 1);
+    let mut restored = Device::standalone();
+    load_configuration(&mut restored, &router.running_config().render()).unwrap();
+    assert_eq!(restored.running_config(), router.running_config());
+    for (input, expected) in [
+        ("neighbor ?", "<neighbor-address>"),
+        ("neighbor 10.0.0.2 ?", "remote-as"),
+        ("neighbor 10.0.0.2 r ?", "<1-4294967294>"),
+        ("network 192.0.2.1 ?", "mask"),
+        ("network 192.0.2.1 m ?", "<netmask>"),
+    ] {
+        let ParsedInput::Help(help) = parse(input, session.mode).unwrap() else {
+            panic!("help expected")
+        };
+        assert!(help.contains(expected), "{input}: {help}");
+    }
+    assert!(
+        run(&mut router, &mut session, "do sh ip b su")
+            .unwrap()
+            .output
+            .contains("State/PfxRcd")
+    );
+    for input in [
+        "no nei 10.0.0.2 next",
+        "no nei 10.0.0.2 up",
+        "no net 192.0.2.1 m 255.255.255.255",
+        "no b r",
+        "no nei 10.0.0.2",
+        "exit",
+        "no rou b 65001",
+    ] {
+        run(&mut router, &mut session, input).unwrap();
+    }
+    assert!(router.running_config().bgp.is_none());
+    for input in ["router bgp 0", "router bgp 4294967295"] {
+        assert!(parse(input, CliMode::GlobalConfiguration).is_err());
+    }
+}

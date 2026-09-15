@@ -1,8 +1,20 @@
+mod bgp;
 mod ospfv3;
 use crate::CliMode;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Action {
+    RouterBgp,
+    NoRouterBgp,
+    BgpRouterId,
+    NoBgpRouterId,
+    BgpNetwork,
+    NoBgpNetwork,
+    BgpNeighbor,
+    NoBgpNeighbor,
+    BgpTable,
+    BgpSummary,
+    BgpNeighbors,
     Ipv6Routing,
     NoIpv6Routing,
     Ipv6Enable,
@@ -1077,5 +1089,6 @@ pub(crate) fn tree(mode: CliMode) -> Node {
         }
     }
     ospfv3::add(&mut root, mode);
+    bgp::add(&mut root, mode);
     root
 }

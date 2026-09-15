@@ -212,6 +212,10 @@ impl Lab {
                 self.lacp_timer(device)?;
                 return Ok(None);
             }
+            SimulationEvent::BgpTimer { device, generation } => {
+                self.tick_bgp(device, generation)?;
+                return Ok(None);
+            }
             SimulationEvent::TcpTick { device } => {
                 self.tcp_timer(device)?;
                 return Ok(None);

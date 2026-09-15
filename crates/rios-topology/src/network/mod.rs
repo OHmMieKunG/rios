@@ -19,6 +19,7 @@ const DHCP_SERVER_PORT: u16 = 67;
 const DHCP_CLIENT_PORT: u16 = 68;
 
 mod arp;
+mod bgp;
 mod dhcp;
 mod forwarding;
 mod icmp;

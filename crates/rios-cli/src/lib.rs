@@ -32,6 +32,14 @@ pub enum OspfPortOption {
     Dead(u32),
     Network(rios_config::OspfNetworkType),
 }
+/// One typed peer edit; the executor resolves interface names through the device API.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BgpNeighborOption {
+    Remove,
+    RemoteAs(u32),
+    UpdateSource(Option<String>),
+    NextHopSelf(bool),
+}
 /// Routing configuration context reserved for later protocol implementation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RoutingProtocol {
@@ -128,6 +136,22 @@ pub enum DhcpPoolOption {
 /// Validated syntax, independent of state mutation and terminal I/O.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
+    BgpProcess {
+        asn: u32,
+        present: bool,
+    },
+    SetBgpRouterId(Option<Ipv4Addr>),
+    SetBgpNetwork {
+        prefix: Ipv4Network,
+        present: bool,
+    },
+    SetBgpNeighbor {
+        address: Ipv4Addr,
+        option: BgpNeighborOption,
+    },
+    ShowIpBgp,
+    ShowIpBgpSummary,
+    ShowIpBgpNeighbors,
     SetIpv6Routing(bool),
     SetIpv6Port(Ipv6PortOption),
     SetIpv6Route {

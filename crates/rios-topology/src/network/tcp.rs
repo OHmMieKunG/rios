@@ -3,6 +3,21 @@ use super::*;
 use rios_device::TcpSocket;
 
 impl Lab {
+    pub(super) fn transmit_tcp_packet(
+        &mut self,
+        device: DeviceId,
+        mut packet: Ipv4Packet,
+    ) -> Result<(), LabError> {
+        if let Ok(segment) =
+            rios_protocol::TcpSegment::decode(packet.source, packet.destination, &packet.payload)
+            && (segment.source_port == 179 || segment.destination_port == 179)
+            && let Some(ttl) = self.device(device)?.bgp_transport_ttl(packet.destination)
+        {
+            packet.ttl = ttl;
+        }
+        self.send_ipv4_packet(device, packet).map(|_| ())
+    }
+
     /// Listen inside a simulated device without opening an OS socket.
     pub fn tcp_listen(&mut self, device: DeviceId, port: u16) -> Result<(), LabError> {
         self.devices
@@ -35,7 +50,7 @@ impl Lab {
             .get_mut(&device)
             .ok_or_else(|| LabError::UnknownDevice(device.0.to_string()))?
             .tcp_connect(socket, now)?;
-        self.send_ipv4_packet(device, packet)?;
+        self.transmit_tcp_packet(device, packet)?;
         self.ensure_tcp_timer(device)?;
         Ok(socket)
     }
@@ -52,7 +67,7 @@ impl Lab {
             .get_mut(&device)
             .ok_or_else(|| LabError::UnknownDevice(device.0.to_string()))?
             .tcp_send(socket, payload, now)?;
-        self.send_ipv4_packet(device, packet)?;
+        self.transmit_tcp_packet(device, packet)?;
         Ok(())
     }
     /// Read received bytes and advertise the newly available receive window.
@@ -62,7 +77,7 @@ impl Lab {
             .get_mut(&device)
             .ok_or_else(|| LabError::UnknownDevice(device.0.to_string()))?
             .tcp_read(socket)?;
-        self.send_ipv4_packet(device, packet)?;
+        self.transmit_tcp_packet(device, packet)?;
         Ok(bytes)
     }
     /// Abort a stream with a simulated RST; no operating-system socket is involved.
@@ -72,7 +87,7 @@ impl Lab {
             .get_mut(&device)
             .ok_or_else(|| LabError::UnknownDevice(device.0.to_string()))?
             .tcp_abort(socket)?;
-        self.send_ipv4_packet(device, packet)?;
+        self.transmit_tcp_packet(device, packet)?;
         Ok(())
     }
     /// Close a stream using simulated FIN and ACK packets.
@@ -83,7 +98,7 @@ impl Lab {
             .get_mut(&device)
             .ok_or_else(|| LabError::UnknownDevice(device.0.to_string()))?
             .tcp_close(socket, now)?;
-        self.send_ipv4_packet(device, packet)?;
+        self.transmit_tcp_packet(device, packet)?;
         Ok(())
     }
     pub(super) fn handle_tcp(
@@ -98,11 +113,12 @@ impl Lab {
             .ok_or_else(|| LabError::UnknownDevice(device.0.to_string()))?
             .receive_tcp(&packet, now)
         {
-            self.send_ipv4_packet(device, reply)?;
+            self.transmit_tcp_packet(device, reply)?;
         }
+        self.pump_bgp(device)?;
         self.ensure_tcp_timer(device)
     }
-    fn ensure_tcp_timer(&mut self, device: DeviceId) -> Result<(), LabError> {
+    pub(super) fn ensure_tcp_timer(&mut self, device: DeviceId) -> Result<(), LabError> {
         if self.device(device)?.tcp_connections().is_empty() || self.tcp_timers.contains(&device) {
             return Ok(());
         }
@@ -120,8 +136,9 @@ impl Lab {
             .ok_or_else(|| LabError::UnknownDevice(device.0.to_string()))?
             .tcp_tick(now);
         for packet in packets {
-            self.send_ipv4_packet(device, packet)?;
+            self.transmit_tcp_packet(device, packet)?;
         }
+        self.pump_bgp(device)?;
         self.ensure_tcp_timer(device)
     }
 }

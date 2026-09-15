@@ -26,6 +26,18 @@ pub struct ResolvedRoute {
 impl Device {
     /// Connected routes derived from operational interface configuration.
     pub fn routing_table(&self) -> RoutingTable {
+        let mut table = self.routing_table_without_bgp();
+        for route in &self.bgp.routes {
+            if route
+                .outgoing_interface
+                .is_some_and(|id| self.protocol_up(id))
+            {
+                table.insert(route.clone());
+            }
+        }
+        table
+    }
+    pub(crate) fn routing_table_without_bgp(&self) -> RoutingTable {
         let mut table = RoutingTable::default();
         for id in self.running_config.interfaces.keys() {
             if self.protocol_up(*id)
@@ -90,15 +102,42 @@ impl Device {
 
     /// Resolve connected or static forwarding to an operational egress interface.
     pub fn resolve_route(&self, destination: Ipv4Addr) -> Option<ResolvedRoute> {
-        let table = self.routing_table();
-        let route = table.lookup(destination)?;
-        let interface = route.outgoing_interface?;
-        Some(ResolvedRoute {
-            interface,
-            source_ip: self.interface_ipv4(interface)?.address(),
-            source_mac: self.interfaces[&interface].mac_address,
-            next_hop: route.next_hop.unwrap_or(destination),
-        })
+        self.resolve_in_table(&self.routing_table(), destination)
+    }
+    pub(crate) fn resolve_non_bgp_route(&self, destination: Ipv4Addr) -> Option<ResolvedRoute> {
+        self.resolve_in_table(&self.routing_table_without_bgp(), destination)
+    }
+    fn resolve_in_table(
+        &self,
+        table: &RoutingTable,
+        mut destination: Ipv4Addr,
+    ) -> Option<ResolvedRoute> {
+        let mut visited = std::collections::BTreeSet::new();
+        for _ in 0..16 {
+            if !visited.insert(destination) {
+                return None;
+            }
+            let route = table.lookup(destination)?;
+            let interface = route.outgoing_interface?;
+            if !self.protocol_up(interface) {
+                return None;
+            }
+            let ip = self.interface_ipv4(interface)?;
+            let next_hop = route.next_hop.unwrap_or(destination);
+            if route.next_hop.is_none()
+                || Ipv4Network::new(ip.address(), ip.prefix_len())
+                    .is_ok_and(|prefix| prefix.contains(next_hop))
+            {
+                return Some(ResolvedRoute {
+                    interface,
+                    source_ip: ip.address(),
+                    source_mac: self.interfaces[&interface].mac_address,
+                    next_hop,
+                });
+            }
+            destination = next_hop;
+        }
+        None
     }
 
     /// Address and MAC used to reach a directly connected destination.
@@ -187,7 +226,7 @@ impl Device {
     pub fn show_ip_route(&self) -> String {
         let table = self.routing_table();
         let mut output = String::from(
-            "Codes: C - connected, S - static, O - OSPF, IA - inter area\n       E1 - OSPF external type 1, E2 - OSPF external type 2\n\n",
+            "Codes: C - connected, S - static, O - OSPF, IA - inter area\n       E1 - OSPF external type 1, E2 - OSPF external type 2, B - BGP\n\n",
         );
         for route in table.routes() {
             let interface = route
@@ -196,6 +235,7 @@ impl Device {
                 .map_or("unknown", |config| config.name.as_str());
             if let Some(next_hop) = route.next_hop {
                 let (code, distance) = match route.source {
+                    RouteSource::Bgp => ("B", route.administrative_distance),
                     RouteSource::Ospf => ("O", 110),
                     RouteSource::OspfInterArea => ("O IA", 110),
                     RouteSource::OspfExternal1 => ("O E1", 110),

@@ -1,4 +1,5 @@
 mod acl;
+mod bgp;
 mod dhcp;
 mod ipv6;
 mod nat;
@@ -165,6 +166,23 @@ fn parse_input(
     }
     let action = node.action.ok_or(ParseError::Incomplete)?;
     let args = &words[index..];
+    if matches!(
+        action,
+        Action::RouterBgp
+            | Action::NoRouterBgp
+            | Action::BgpRouterId
+            | Action::NoBgpRouterId
+            | Action::BgpNetwork
+            | Action::NoBgpNetwork
+            | Action::BgpNeighbor
+            | Action::NoBgpNeighbor
+    ) {
+        return Ok(ParsedInput::Command(
+            bgp::options(action, args)?
+                .command
+                .ok_or(ParseError::Incomplete)?,
+        ));
+    }
     let expected = match action {
         Action::Ipv6Address
         | Action::NoIpv6Address
@@ -256,6 +274,13 @@ fn parse_input(
     };
     use Action::*;
     let command = match action {
+        RouterBgp | NoRouterBgp | BgpRouterId | NoBgpRouterId | BgpNetwork | NoBgpNetwork
+        | BgpNeighbor | NoBgpNeighbor => bgp::options(action, args)?
+            .command
+            .ok_or(ParseError::Incomplete)?,
+        BgpTable => Command::ShowIpBgp,
+        BgpSummary => Command::ShowIpBgpSummary,
+        BgpNeighbors => Command::ShowIpBgpNeighbors,
         RouterOspfv3 | NoRouterOspfv3 => {
             let id = args[0]
                 .text
@@ -410,6 +435,9 @@ fn parse_input(
                     | Command::ShowIpv6OspfDatabase
                     | Command::ShowIpv6Route
                     | Command::PingIpv6 { .. }
+                    | Command::ShowIpBgp
+                    | Command::ShowIpBgpSummary
+                    | Command::ShowIpBgpNeighbors
                     | Command::ShowIpOspf
                     | Command::ShowIpProtocols
                     | Command::ShowIpOspfNeighborDetail
@@ -965,6 +993,19 @@ pub fn suggestions(
     }
     if let Some(action) = node.action {
         let args = &complete[used..];
+        if matches!(
+            action,
+            Action::RouterBgp
+                | Action::NoRouterBgp
+                | Action::BgpRouterId
+                | Action::NoBgpRouterId
+                | Action::BgpNetwork
+                | Action::NoBgpNetwork
+                | Action::BgpNeighbor
+                | Action::NoBgpNeighbor
+        ) {
+            return bgp::suggest(action, args, partial, start);
+        }
         if matches!(action, Action::AclPermit | Action::AclDeny) {
             let CliMode::AccessListConfiguration(_, kind) = mode else {
                 return Err(invalid(0, "not in ACL mode"));

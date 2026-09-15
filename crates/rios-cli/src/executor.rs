@@ -64,6 +64,9 @@ fn executable_after_do(command: &Command) -> bool {
             | Command::ShowIpv6OspfDatabase
             | Command::ShowIpv6Route
             | Command::PingIpv6 { .. }
+            | Command::ShowIpBgp
+            | Command::ShowIpBgpSummary
+            | Command::ShowIpBgpNeighbors
             | Command::ShowIpOspf
             | Command::ShowIpProtocols
             | Command::ShowIpOspfNeighborDetail
@@ -175,6 +178,10 @@ pub fn execute_at(
             matches!(mode, DhcpPoolConfiguration(_))
         }
         Command::EnterVlan(_) => matches!(mode, GlobalConfiguration | VlanConfiguration(_)),
+        Command::BgpProcess { .. } => mode == GlobalConfiguration,
+        Command::SetBgpRouterId(_)
+        | Command::SetBgpNeighbor { .. }
+        | Command::SetBgpNetwork { .. } => mode == RouterConfiguration(RoutingProtocol::Bgp),
         Command::EnterRouterOspfv3(_)
         | Command::RemoveRouterOspfv3(_)
         | Command::EnterRouterOspf(_) => mode == GlobalConfiguration,
@@ -236,6 +243,9 @@ pub fn execute_at(
         | Command::ShowIpv6OspfDatabase
         | Command::ShowIpv6Route
         | Command::PingIpv6 { .. }
+        | Command::ShowIpBgp
+        | Command::ShowIpBgpSummary
+        | Command::ShowIpBgpNeighbors
         | Command::ShowIpOspf
         | Command::ShowIpProtocols
         | Command::ShowIpOspfNeighborDetail
@@ -410,6 +420,62 @@ pub fn execute_at(
             session.mode = VlanConfiguration(vlan);
         }
         Command::RemoveVlan(vlan) => device.remove_vlan(vlan)?,
+        Command::BgpProcess { asn, present } => {
+            if present {
+                device.set_bgp_process(Some(asn))?;
+                session.mode = RouterConfiguration(RoutingProtocol::Bgp);
+            } else if device
+                .running_config()
+                .bgp
+                .as_ref()
+                .is_some_and(|c| c.local_as == asn)
+            {
+                device.set_bgp_process(None)?;
+            } else {
+                return Err(DeviceError::InvalidBgpConfig.into());
+            }
+        }
+        Command::SetBgpRouterId(id) => device.set_bgp_router_id(id)?,
+        Command::SetBgpNetwork { prefix, present } => device.set_bgp_network(prefix, present)?,
+        Command::SetBgpNeighbor { address, option } => {
+            if option == BgpNeighborOption::Remove {
+                device.set_bgp_neighbor(address, None)?;
+            } else {
+                let mut config = device
+                    .running_config()
+                    .bgp
+                    .as_ref()
+                    .and_then(|c| c.neighbors.get(&address))
+                    .cloned();
+                if let BgpNeighborOption::RemoteAs(remote_as) = option {
+                    config
+                        .get_or_insert(rios_config::BgpNeighborConfig {
+                            remote_as,
+                            update_source: None,
+                            next_hop_self: false,
+                        })
+                        .remote_as = remote_as;
+                }
+                let mut config = config.ok_or(DeviceError::InvalidBgpConfig)?;
+                match option {
+                    BgpNeighborOption::NextHopSelf(value) => config.next_hop_self = value,
+                    BgpNeighborOption::UpdateSource(name) => {
+                        config.update_source = name
+                            .map(|name| {
+                                device
+                                    .find_interface(&name)
+                                    .ok_or(DeviceError::InvalidInterface(name))
+                            })
+                            .transpose()?
+                    }
+                    _ => {}
+                }
+                device.set_bgp_neighbor(address, Some(config))?;
+            }
+        }
+        Command::ShowIpBgp => result.output = device.show_ip_bgp(),
+        Command::ShowIpBgpSummary => result.output = device.show_ip_bgp_summary(),
+        Command::ShowIpBgpNeighbors => result.output = device.show_ip_bgp_neighbors(now),
         Command::EnterRouterOspfv3(process_id) => {
             device.set_ospfv3_process(Some(process_id))?;
             session.mode = RouterConfiguration(RoutingProtocol::Ospfv3);

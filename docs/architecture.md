@@ -526,3 +526,41 @@ instance ID 0. It does not yet originate inter-area or external routes, implemen
 virtual links, authentication/IPsec, ECMP, or fragment an individual oversized
 LSA. IPv4 OSPF functionality remains independent. Protocol formats follow
 [RFC 5340](https://www.rfc-editor.org/rfc/rfc5340).
+
+## BGP over simulated TCP
+
+BGP IPv4 unicast exchanges OPEN, KEEPALIVE, UPDATE and NOTIFICATION bytes on
+simulated TCP port 179. It never copies routes between device objects. The normal
+IPv4 forwarding, ARP, ACL, loss and capture paths carry TCP handshakes, data and
+retransmissions. External peers use TTL 1, internal peers TTL 255, including every
+retransmission. `update-source` selects a configured operational interface.
+
+The bounded TCP stream framer handles split/coalesced messages. The session FSM
+negotiates four-octet ASNs and hold time, handles connection collisions, and uses
+virtual keepalive, hold and retry deadlines. Device sessions currently offer a
+180-second hold time. Removing a process or peer closes its transport and removes
+learned routes. Link failure and TCP failure trigger ordinary withdrawal and
+reconnection; no wall-clock protocol timers exist.
+
+Selection applies local preference, local origination, AS path length, origin,
+MED within neighboring-AS groups, external/internal preference, IGP cost, router
+ID and peer address. AS loops are rejected. iBGP preserves NEXT_HOP and enforces
+split horizon; `next-hop-self` changes advertised next hops. Recursive resolution
+uses the non-BGP RIB to establish next-hop reachability. Learned routes use AD 20
+or 200. `network ... mask ...` requires an exact non-BGP route before originating.
+
+Limits: 256 peers/device, two collision candidates/peer, 4096 received
+prefixes/peer, 4096 selected prefixes/device, 8192 framing bytes/stream and 32
+queued messages/stream. Backpressure defers export while TCP is busy. This initial
+slice excludes route reflection, policy maps, prefix lists and default-originate;
+those are the remaining BGP roadmap work. IPv6 AFI/SAFI, graceful restart,
+ADD-PATH, extended messages and legacy AS4_PATH reconstruction are not supported.
+RIOS peers advertise four-octet ASN capability. Codecs follow public
+[RFC 4271](https://datatracker.ietf.org/doc/html/rfc4271) and
+[RFC 6793](https://www.rfc-editor.org/rfc/rfc6793.html).
+
+Exercise the terminal path with:
+
+```sh
+cargo run -- lab examples/two-routers.yaml < examples/bgp-session.txt
+```
