@@ -37,6 +37,8 @@ impl From<IpProtocol> for u8 {
 /// Minimal IPv4 packet used by the simulator. Options and fragmentation are rejected.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ipv4Packet {
+    /// Differentiated Services byte: six DSCP bits followed by two ECN bits.
+    pub dscp_ecn: u8,
     /// Sender address.
     pub source: Ipv4Addr,
     /// Final destination address.
@@ -65,6 +67,15 @@ pub enum PacketError {
 }
 
 impl Ipv4Packet {
+    /// Six-bit DiffServ codepoint, excluding ECN congestion notification bits.
+    pub fn dscp(&self) -> u8 {
+        self.dscp_ecn >> 2
+    }
+    /// Legacy three-bit IP precedence carried in the same DS byte.
+    pub fn precedence(&self) -> u8 {
+        self.dscp_ecn >> 5
+    }
+
     /// Encode a checksum-valid 20-byte IPv4 header followed by the payload.
     pub fn encode(&self) -> Result<Vec<u8>, PacketError> {
         if self.ttl == 0 {
@@ -76,6 +87,7 @@ impl Ipv4Packet {
             .ok_or(PacketError::InvalidLength)?;
         let mut bytes = vec![0; total];
         bytes[0] = 0x45;
+        bytes[1] = self.dscp_ecn;
         bytes[2..4].copy_from_slice(&(total as u16).to_be_bytes());
         bytes[6..8].copy_from_slice(&0x4000u16.to_be_bytes());
         bytes[8] = self.ttl;
@@ -107,6 +119,7 @@ impl Ipv4Packet {
             return Err(PacketError::Expired);
         }
         Ok(Self {
+            dscp_ecn: bytes[1],
             source: Ipv4Addr::new(bytes[12], bytes[13], bytes[14], bytes[15]),
             destination: Ipv4Addr::new(bytes[16], bytes[17], bytes[18], bytes[19]),
             ttl: bytes[8],
@@ -136,6 +149,7 @@ mod tests {
     #[test]
     fn packet_round_trip_and_checksum_validation() {
         let packet = Ipv4Packet {
+            dscp_ecn: 0,
             source: Ipv4Addr::new(10, 0, 0, 1),
             destination: Ipv4Addr::new(10, 0, 0, 2),
             ttl: 64,
@@ -153,5 +167,34 @@ mod tests {
             Ipv4Packet { ttl: 0, ..packet }.encode(),
             Err(PacketError::Expired)
         );
+    }
+}
+
+#[cfg(test)]
+mod diffserv_tests {
+    use super::*;
+    #[test]
+    fn every_dscp_ecn_byte_roundtrips_and_participates_in_checksum() {
+        let mut packet = Ipv4Packet {
+            dscp_ecn: 0,
+            source: Ipv4Addr::LOCALHOST,
+            destination: Ipv4Addr::new(192, 0, 2, 1),
+            ttl: 64,
+            protocol: IpProtocol::Udp,
+            payload: Vec::new(),
+        };
+        for value in 0..=255 {
+            packet.dscp_ecn = value;
+            let mut bytes = packet.encode().unwrap();
+            assert_eq!(bytes[1], value);
+            assert_eq!(Ipv4Packet::decode(&bytes).unwrap(), packet);
+            assert_eq!(packet.dscp(), value >> 2);
+            assert_eq!(packet.precedence(), value >> 5);
+            bytes[1] ^= 1;
+            assert_eq!(
+                Ipv4Packet::decode(&bytes),
+                Err(PacketError::InvalidChecksum)
+            );
+        }
     }
 }

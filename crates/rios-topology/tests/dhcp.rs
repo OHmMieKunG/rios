@@ -332,6 +332,7 @@ fn reserved_client_receives_fixed_address_and_wrong_request_gets_nak() {
         rebinding_seconds: None,
     };
     let ip = Ipv4Packet {
+        dscp_ecn: 0,
         source: Ipv4Addr::UNSPECIFIED,
         destination: Ipv4Addr::BROADCAST,
         ttl: 64,

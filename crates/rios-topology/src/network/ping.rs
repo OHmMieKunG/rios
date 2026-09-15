@@ -117,6 +117,7 @@ impl Lab {
                 payload: vec![0; 32],
             };
             let packet = Ipv4Packet {
+                dscp_ecn: 0,
                 source: route.source_ip,
                 destination,
                 ttl,

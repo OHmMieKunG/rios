@@ -450,6 +450,7 @@ impl Lab {
                 .map_err(|error| LabError::Protocol(error.to_string()))?,
         };
         Ok(Ipv4Packet {
+            dscp_ecn: 0,
             source,
             destination,
             ttl: 64,

@@ -236,6 +236,7 @@ fn extended_acl_filters_udp_ports_in_actual_routed_frames() {
         .unwrap();
     for (port, expected) in [(53, true), (80, false)] {
         let packet = Ipv4Packet {
+            dscp_ecn: 0,
             source: "10.10.10.10".parse().unwrap(),
             destination: "10.20.20.20".parse().unwrap(),
             ttl: 64,

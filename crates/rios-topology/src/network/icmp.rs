@@ -26,6 +26,7 @@ impl Lab {
             payload: echo.payload,
         };
         let response = Ipv4Packet {
+            dscp_ecn: 0,
             source: packet.destination,
             destination: packet.source,
             ttl: 64,
@@ -63,6 +64,7 @@ impl Lab {
         self.send_ipv4_packet(
             device,
             Ipv4Packet {
+                dscp_ecn: 0,
                 source: route.source_ip,
                 destination: original.source,
                 ttl: 64,

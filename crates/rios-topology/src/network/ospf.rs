@@ -31,6 +31,7 @@ impl Lab {
                 continue;
             };
             let packet = Ipv4Packet {
+                dscp_ecn: 0,
                 source: action.source,
                 destination: action.destination,
                 ttl: 1,

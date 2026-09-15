@@ -128,6 +128,7 @@ impl Device {
     pub fn access_list_permits(&self, id: AccessListId, source: std::net::Ipv4Addr) -> bool {
         if let Some(named) = self.acl_id(&id.get().to_string()) {
             let packet = Ipv4Packet {
+                dscp_ecn: 0,
                 source,
                 destination: std::net::Ipv4Addr::UNSPECIFIED,
                 ttl: 64,

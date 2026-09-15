@@ -223,6 +223,7 @@ fn exhausted_pool_drops_without_leaking_and_expired_address_is_reusable() {
         let inside = device.ensure_interface("gi0/0").unwrap();
         let outside = device.ensure_interface("gi0/1").unwrap();
         let packet = |source: &str| Ipv4Packet {
+            dscp_ecn: 0,
             source: source.parse().unwrap(),
             destination: "203.0.113.2".parse().unwrap(),
             ttl: 64,

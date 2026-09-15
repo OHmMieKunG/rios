@@ -272,6 +272,7 @@ mod tests {
             .set_named_access_group(InterfaceId(1), "WEB-IN", AccessListDirection::In)
             .unwrap();
         let mut packet = Ipv4Packet {
+            dscp_ecn: 0,
             source: "10.0.0.1".parse().unwrap(),
             destination: "192.0.2.10".parse().unwrap(),
             protocol: IpProtocol::Other(6),

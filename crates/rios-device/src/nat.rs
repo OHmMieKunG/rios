@@ -433,6 +433,7 @@ mod tests {
         router.set_nat_overload(acl, outside).unwrap();
 
         let mut outgoing = Ipv4Packet {
+            dscp_ecn: 0,
             source: "10.0.0.2".parse().unwrap(),
             destination: "203.0.113.2".parse().unwrap(),
             ttl: 64,
@@ -458,6 +459,7 @@ mod tests {
         );
 
         let mut reply = Ipv4Packet {
+            dscp_ecn: 0,
             source: "203.0.113.2".parse().unwrap(),
             destination: "203.0.113.1".parse().unwrap(),
             ttl: 64,

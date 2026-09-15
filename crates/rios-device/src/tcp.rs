@@ -239,6 +239,7 @@ impl TcpConnection {
 fn packet(socket: TcpSocket, segment: TcpSegment) -> Result<Ipv4Packet, TcpError> {
     // Constructed segments always have bounded payloads and no unsupported options.
     Ok(Ipv4Packet {
+        dscp_ecn: 0,
         source: socket.local_address,
         destination: socket.remote_address,
         ttl: 64,
