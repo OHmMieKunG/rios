@@ -419,13 +419,34 @@ Per-interface cost, priority, hello/dead intervals and network type, process
 router ID, and passive interfaces are structured configuration with CLI replay.
 Router and network LSAs feed weighted SPF; remote advertisements age out,
 local advertisements refresh, and received self-originated LSAs trigger
-fightback. Timers use virtual time; maintenance currently runs at one-second
-resolution. Neighbor count is capped at 256 and LSDB size at 4096. DBD and
+fightback. Protocol deadlines use exact simulation times; a one-second
+maintenance bound also detects carrier changes. Neighbor count is capped at 256 and LSDB size at 4096. DBD and
 request/ack packets are divided to fit the interface MTU. An individual LSA
 larger than the interface MTU is not fragmented and cannot be synchronized.
 Authentication, virtual links, NBMA, and opaque LSAs are not implemented.
 
 Legacy topology tests now allow the default 40-second broadcast Wait timer.
 Tests needing rapid adjacency can explicitly select `ip ospf network
-point-to-point`. Multi-area summaries and external origination follow this
-adjacency milestone; their wire formats and SPF calculations already exist.
+point-to-point`.
+
+ABRs attached to area 0 originate Type 3 network and Type 4 ASBR summaries.
+Inter-area propagation follows the backbone; Type 1/2 LSAs remain area scoped.
+Type 5 LSAs flood across normal areas. `default-information originate` tracks a
+non-OSPF default in the RIB unless `always` is specified. `redistribute static
+subnets` exports reachable non-default static routes. Both accept `metric` and
+`metric-type 1|2`; withdrawals flush LSAs at MaxAge. Route selection prefers
+intra-area over inter-area, then E1 over E2, with internal cost breaking E2 ties.
+Overlapping prefixes receive distinct link-state IDs. Stub/NSSA areas, virtual
+links and ECMP are not implemented.
+
+A runnable three-router ABR example is:
+
+```sh
+cargo run -- lab examples/three-routers.yaml < examples/ospf-multi-area-session.txt
+```
+
+Tests cover standards-based packet exchange, multi-page database synchronization,
+loss/retransmission recovery, DR/BDR failover, passive/timer mismatch, cost changes,
+Type 3/4/5 propagation through three areas, route withdrawal, conditional default
+origination, overlapping prefixes, LSA aging and rejection of older instances.
+Protocol design follows [RFC 2328](https://www.rfc-editor.org/rfc/rfc2328).

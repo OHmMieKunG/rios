@@ -186,7 +186,9 @@ impl Device {
     /// Render connected routes from current operational interface state.
     pub fn show_ip_route(&self) -> String {
         let table = self.routing_table();
-        let mut output = String::from("Codes: C - connected, S - static, O - OSPF\n\n");
+        let mut output = String::from(
+            "Codes: C - connected, S - static, O - OSPF, IA - inter area\n       E1 - OSPF external type 1, E2 - OSPF external type 2\n\n",
+        );
         for route in table.routes() {
             let interface = route
                 .outgoing_interface

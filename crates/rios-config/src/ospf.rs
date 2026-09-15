@@ -57,3 +57,34 @@ impl OspfInterfaceConfig {
         }
     }
 }
+
+/// Default-information policy and the metric of the originated Type 5 LSA.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OspfDefaultRoute {
+    pub always: bool,
+    pub metric: u32,
+    pub type_two: bool,
+}
+impl Default for OspfDefaultRoute {
+    fn default() -> Self {
+        Self {
+            always: false,
+            metric: 1,
+            type_two: true,
+        }
+    }
+}
+/// Metric policy for static-route redistribution into OSPF.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OspfRedistribute {
+    pub metric: u32,
+    pub type_two: bool,
+}
+impl Default for OspfRedistribute {
+    fn default() -> Self {
+        Self {
+            metric: 20,
+            type_two: true,
+        }
+    }
+}

@@ -1010,3 +1010,56 @@ fn advanced_ospf_policy_abbreviates_validates_and_replays() {
     );
     assert!(run(&mut router, &mut session, "do sh ip ospf nei det").is_ok());
 }
+
+#[test]
+fn ospf_external_policy_help_and_configuration_share_grammar() {
+    let mut device = Device::standalone();
+    let mut session = CliSession {
+        mode: CliMode::GlobalConfiguration,
+    };
+    for command in [
+        "router ospf 1",
+        "default-information originate always metric 7 metric-type 1",
+        "redistribute static subnets metric 30 metric-type 2",
+        "end",
+    ] {
+        run(&mut device, &mut session, command).unwrap();
+    }
+    let mut restored = Device::standalone();
+    load_configuration(&mut restored, &device.running_config().render()).unwrap();
+    assert_eq!(restored.running_config(), device.running_config());
+    let mode = CliMode::RouterConfiguration(RoutingProtocol::Ospf);
+    for line in ["default-information originate", "redistribute static"] {
+        assert!(parse(line, mode).is_ok());
+    }
+    assert!(matches!(
+        parse("default-information originate m 5", mode),
+        Err(ParseError::Ambiguous(_))
+    ));
+    assert!(parse("default-information originate metric 16777215", mode).is_err());
+    assert!(parse("redistribute static always", mode).is_err());
+    assert_eq!(
+        suggestions("default-information originate metric-type ", mode, &[])
+            .unwrap()
+            .iter()
+            .map(|s| s.word.as_str())
+            .collect::<Vec<_>>(),
+        vec!["1", "2"]
+    );
+    assert!(
+        suggestions("redistribute static ", mode, &[])
+            .unwrap()
+            .iter()
+            .any(|s| s.word == "<cr>")
+    );
+    session.mode = mode;
+    run(
+        &mut device,
+        &mut session,
+        "no default-information originate",
+    )
+    .unwrap();
+    run(&mut device, &mut session, "no redistribute static").unwrap();
+    let config = device.running_config().ospf.as_ref().unwrap();
+    assert!(config.default_information.is_none() && config.redistribute_static.is_none());
+}

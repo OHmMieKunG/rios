@@ -314,6 +314,17 @@ impl OspfExchange {
             OspfNeighborState::Exchange | OspfNeighborState::Loading | OspfNeighborState::Full
         )
     }
+    /// Earliest active retransmission deadline for the owning simulator event queue.
+    pub fn next_deadline(&self) -> Option<SimTime> {
+        let dd = (self.state == OspfNeighborState::ExStart
+            || (self.state == OspfNeighborState::Exchange && self.master))
+            .then_some(self.dd_due);
+        let request = (self.state == OspfNeighborState::Loading).then_some(self.request_due);
+        dd.into_iter()
+            .chain(request)
+            .chain(self.retransmit.values().map(|(_, due)| *due))
+            .min()
+    }
     /// Generate only due retransmissions; no wall clock or background thread is used.
     pub fn tick(&mut self, now: SimTime) -> Vec<OspfBody> {
         let mut out = Vec::new();

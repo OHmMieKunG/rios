@@ -6,7 +6,7 @@ impl Device {
         self.ospf_runtime
             .database
             .iter()
-            .filter(|((scope, _), _)| *scope == area)
+            .filter(|((scope, key), _)| *scope == area || key.kind == LsaType::External)
             .map(|((_, key), stored)| (*key, stored.current(now)))
             .collect()
     }
@@ -29,7 +29,7 @@ impl Device {
                     .ospf_runtime
                     .interfaces
                     .get(&key.0)
-                    .is_none_or(|r| r.area != area)
+                    .is_none_or(|r| r.area != area && !matches!(lsa.body, LsaBody::External { .. }))
             {
                 continue;
             }
@@ -53,6 +53,11 @@ impl Device {
         now: SimTime,
         out: &mut Vec<OspfTransmission>,
     ) {
+        let area = if matches!(lsa.body, LsaBody::External { .. }) {
+            0
+        } else {
+            area
+        };
         let key = (area, lsa.key());
         let Ok(header) = lsa.header() else {
             return;
@@ -106,7 +111,8 @@ impl Device {
         };
         let active = self.ospf_interfaces();
         let areas: BTreeSet<_> = active.iter().map(|(_, _, a)| *a).collect();
-        let mut desired = BTreeMap::new();
+        let mut desired = self.ospf_external_lsas(self_id);
+        let external = !desired.is_empty();
         for area in &areas {
             let mut links = Vec::new();
             for (id, ip, _) in active.iter().filter(|(_, _, a)| a == area) {
@@ -183,16 +189,14 @@ impl Device {
                 advertising_router: self_id,
                 sequence: LSA_INITIAL_SEQUENCE,
                 body: LsaBody::Router {
-                    flags: if areas.len() > 1 && areas.contains(&0) {
-                        1
-                    } else {
-                        0
-                    },
+                    flags: u8::from(areas.len() > 1 && areas.contains(&0))
+                        | if external { 2 } else { 0 },
                     links,
                 },
             };
             desired.insert((*area, lsa.key()), lsa);
         }
+        self.ospf_summaries(self_id, &areas, now, &mut desired);
         let mut updates = Vec::new();
         for (key, mut lsa) in desired.iter().map(|(k, v)| (*k, v.clone())) {
             if let Some(old) = self.ospf_runtime.database.get(&key) {
@@ -258,15 +262,18 @@ impl Device {
             return;
         };
         let areas: BTreeSet<_> = self
-            .ospf_runtime
-            .database
-            .keys()
-            .map(|(area, _)| *area)
+            .ospf_interfaces()
+            .iter()
+            .map(|(_, _, area)| *area)
             .collect();
+        let abr = areas.len() > 1 && areas.contains(&0);
+        let mut selected: BTreeMap<Ipv4Network, (OspfSpfRoute, Route)> = BTreeMap::new();
         for area in areas {
             let database = self.ospf_database(area, now);
             for route in ospf_spf(self_id, database.values()).into_values() {
-                if route.first_hop == self_id {
+                if route.first_hop == self_id
+                    || (abr && area != 0 && route.source == rios_ipv4::RouteSource::OspfInterArea)
+                {
                     continue;
                 }
                 let Some(neighbor) = self
@@ -291,15 +298,27 @@ impl Device {
                 else {
                     continue;
                 };
-                self.ospf_runtime.routes.push(Route {
-                    prefix: route.prefix,
-                    next_hop: Some(neighbor.info.address),
-                    outgoing_interface: Some(neighbor.info.interface),
-                    administrative_distance: 110,
-                    metric: route.metric,
-                    source: route.source,
-                });
+                if selected
+                    .get(&route.prefix)
+                    .is_none_or(|(old, _)| route.preference() < old.preference())
+                {
+                    selected.insert(
+                        route.prefix,
+                        (
+                            route,
+                            Route {
+                                prefix: route.prefix,
+                                next_hop: Some(neighbor.info.address),
+                                outgoing_interface: Some(neighbor.info.interface),
+                                administrative_distance: 110,
+                                metric: route.metric,
+                                source: route.source,
+                            },
+                        ),
+                    );
+                }
             }
         }
+        self.ospf_runtime.routes = selected.into_values().map(|(_, route)| route).collect();
     }
 }

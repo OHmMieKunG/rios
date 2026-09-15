@@ -160,7 +160,9 @@ pub fn execute_at(
         Command::EnterVlan(_) => matches!(mode, GlobalConfiguration | VlanConfiguration(_)),
         Command::EnterRouterOspf(_) => mode == GlobalConfiguration,
         Command::NameVlan(_) => matches!(mode, VlanConfiguration(_)),
-        Command::SetOspfRouterId(_)
+        Command::SetOspfDefault(_)
+        | Command::SetOspfRedistributeStatic(_)
+        | Command::SetOspfRouterId(_)
         | Command::SetOspfPassive { .. }
         | Command::AddOspfNetwork(_) => matches!(mode, RouterConfiguration(RoutingProtocol::Ospf)),
         Command::EnterInterface(_) | Command::EnterInterfaceRange { .. } | Command::End => {
@@ -385,6 +387,10 @@ pub fn execute_at(
             session.mode = RouterConfiguration(RoutingProtocol::Ospf);
         }
         Command::AddOspfNetwork(network) => device.add_ospf_network(network)?,
+        Command::SetOspfDefault(policy) => device.set_ospf_default(policy)?,
+        Command::SetOspfRedistributeStatic(policy) => {
+            device.set_ospf_redistribute_static(policy)?
+        }
         Command::SetOspfRouterId(id) => device.set_ospf_router_id(id)?,
         Command::SetOspfPassive { interface, passive } => {
             let id = device

@@ -203,6 +203,8 @@ pub enum Command {
     EnterRouterOspf(u16),
     AddOspfNetwork(OspfNetworkConfig),
     SetOspfRouterId(Option<Ipv4Addr>),
+    SetOspfDefault(Option<rios_config::OspfDefaultRoute>),
+    SetOspfRedistributeStatic(Option<rios_config::OspfRedistribute>),
     SetOspfPassive {
         interface: String,
         passive: bool,

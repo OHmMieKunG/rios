@@ -1,0 +1,62 @@
+connect R1
+enable
+configure terminal
+interface gi0/0
+ip address 10.0.12.1 255.255.255.252
+ip ospf network point-to-point
+no shutdown
+interface lo0
+ip address 172.16.1.1 255.255.255.255
+no shutdown
+exit
+router ospf 1
+router-id 1.1.1.1
+network 10.0.12.1 0.0.0.0 area 1
+network 172.16.1.1 0.0.0.0 area 1
+default-information originate always metric 7 metric-type 1
+end
+exit
+connect R2
+enable
+configure terminal
+interface gi0/0
+ip address 10.0.12.2 255.255.255.252
+ip ospf network point-to-point
+no shutdown
+interface gi0/1
+ip address 10.0.23.1 255.255.255.252
+ip ospf network point-to-point
+no shutdown
+exit
+router ospf 1
+router-id 2.2.2.2
+network 10.0.12.2 0.0.0.0 area 1
+network 10.0.23.1 0.0.0.0 area 0
+end
+exit
+connect R3
+enable
+configure terminal
+interface gi0/0
+ip address 10.0.23.2 255.255.255.252
+ip ospf network point-to-point
+no shutdown
+interface lo0
+ip address 172.16.3.1 255.255.255.255
+no shutdown
+exit
+router ospf 1
+router-id 3.3.3.3
+network 10.0.23.2 0.0.0.0 area 0
+network 172.16.3.1 0.0.0.0 area 0
+end
+exit
+run 1000
+connect R3
+enable
+show ip ospf neighbor detail
+show ip ospf database
+show ip route
+ping 172.16.1.1
+exit
+exit

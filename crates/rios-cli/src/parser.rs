@@ -1,6 +1,7 @@
 mod acl;
 mod dhcp;
 mod nat;
+mod ospf;
 use crate::{
     tree::{Action, Node, tree},
     *,
@@ -164,7 +165,9 @@ fn parse_input(
     let action = node.action.ok_or(ParseError::Incomplete)?;
     let args = &words[index..];
     let expected = match action {
-        Action::Address
+        Action::OspfDefault
+        | Action::OspfRedistribute
+        | Action::Address
         | Action::AccessList
         | Action::NatOverload
         | Action::NatStatic
@@ -208,7 +211,12 @@ fn parse_input(
         Action::NamedStandardAcl | Action::NamedExtendedAcl | Action::NoAclSequence => 1,
         _ => 0,
     };
-    if expected > 0 && args.is_empty() && !matches!(action, Action::Interfaces)
+    if expected > 0
+        && args.is_empty()
+        && !matches!(
+            action,
+            Action::Interfaces | Action::OspfDefault | Action::OspfRedistribute
+        )
         || expected != usize::MAX && args.len() < expected
     {
         return Err(ParseError::Incomplete);
@@ -530,6 +538,11 @@ fn parse_input(
                     .map_err(|_| invalid(args[3].offset, "expected a numeric area ID"))?,
             })
         }
+        OspfDefault | OspfRedistribute => ospf::options(action, args)?
+            .command
+            .ok_or(ParseError::Incomplete)?,
+        NoOspfDefault => Command::SetOspfDefault(None),
+        NoOspfRedistribute => Command::SetOspfRedistributeStatic(None),
         OspfRouterId => Command::SetOspfRouterId(Some(parse_ip(0)?)),
         NoOspfRouterId => Command::SetOspfRouterId(None),
         OspfPassive | NoOspfPassive => {
@@ -740,13 +753,17 @@ fn parse_access_list_id(token: &Token<'_>) -> Result<AccessListId, ParseError> {
 
 fn unique_choice<'a>(token: &Token<'_>, choices: &'a [&str]) -> Result<&'a str, ParseError> {
     let input = token.text.to_ascii_lowercase();
+    if let Some(exact) = choices.iter().copied().find(|choice| *choice == input) {
+        return Ok(exact);
+    }
     let mut matches = choices
         .iter()
         .copied()
         .filter(|value| value.starts_with(&input));
     match (matches.next(), matches.next()) {
         (Some(value), None) => Ok(value),
-        _ => Err(invalid(token.offset, "invalid or ambiguous argument")),
+        (Some(_), Some(_)) => Err(ParseError::Ambiguous(token.text.into())),
+        _ => Err(invalid(token.offset, "invalid argument")),
     }
 }
 /// One tree-derived contextual help or completion candidate.
@@ -1030,6 +1047,9 @@ pub fn suggestions(
                     "<wildcard>"
                 }
                 Action::AccessGroup if args.len() == 1 => "in|out",
+                Action::OspfDefault | Action::OspfRedistribute => {
+                    return ospf::suggest(action, args, partial, start);
+                }
                 Action::NatStatic | Action::NatPool | Action::NatOverload => {
                     return nat::suggest(action, args, partial, start);
                 }

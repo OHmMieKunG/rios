@@ -18,7 +18,8 @@ impl Lab {
             .get_mut(&interface.device)
             .ok_or_else(|| LabError::UnknownDevice(interface.device.0.to_string()))?
             .receive_ospf_v2(interface.interface, packet.source, ospf, now);
-        self.emit_ospf(interface.device, packets)
+        self.emit_ospf(interface.device, packets)?;
+        self.schedule_ospf_timer(interface.device)
     }
     pub(crate) fn emit_ospf(
         &mut self,

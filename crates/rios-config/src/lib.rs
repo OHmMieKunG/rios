@@ -3,7 +3,7 @@
 mod acl;
 mod nat;
 mod ospf;
-pub use ospf::{OspfInterfaceConfig, OspfNetworkType};
+pub use ospf::{OspfDefaultRoute, OspfInterfaceConfig, OspfNetworkType, OspfRedistribute};
 mod stp;
 pub use acl::{AccessList, AclEntry, AclId, AclKind, AclProtocol, AddressMatch, PortMatch};
 pub use nat::{NatPool, NatPoolRule, NatTransport, StaticNat};
@@ -210,6 +210,10 @@ pub struct OspfConfig {
     pub router_id: Option<Ipv4Addr>,
     #[serde(default)]
     pub passive_interfaces: BTreeSet<InterfaceId>,
+    #[serde(default)]
+    pub default_information: Option<OspfDefaultRoute>,
+    #[serde(default)]
+    pub redistribute_static: Option<OspfRedistribute>,
 }
 
 /// Stable identifier for a configured DHCP pool.
@@ -565,6 +569,25 @@ impl RunningConfig {
                 if let Some(interface) = self.interfaces.get(id) {
                     writeln!(out, " passive-interface {}", interface.name).unwrap();
                 }
+            }
+            if let Some(policy) = ospf.default_information {
+                writeln!(
+                    out,
+                    " default-information originate{} metric {} metric-type {}",
+                    if policy.always { " always" } else { "" },
+                    policy.metric,
+                    if policy.type_two { 2 } else { 1 }
+                )
+                .unwrap();
+            }
+            if let Some(policy) = ospf.redistribute_static {
+                writeln!(
+                    out,
+                    " redistribute static subnets metric {} metric-type {}",
+                    policy.metric,
+                    if policy.type_two { 2 } else { 1 }
+                )
+                .unwrap();
             }
             for network in &ospf.networks {
                 writeln!(

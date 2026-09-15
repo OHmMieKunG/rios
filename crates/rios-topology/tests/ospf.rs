@@ -354,3 +354,40 @@ fn loss_recovery_is_deterministic_and_older_lsas_cannot_replace_newer_ones() {
     device.ospf_tick(SimTime(first.now().0 + 2_000_000));
     assert!(device.routing_table().lookup(target).is_none());
 }
+
+#[test]
+fn neighbor_expires_at_exact_received_hello_deadline() {
+    let mut lab = broadcast();
+    lab.run_until(SimTime::from_millis(45_000)).unwrap();
+    let r1 = lab.device_id("R1").unwrap();
+    let r4 = lab.endpoint("R4:gi0/0").unwrap();
+    let rid = Ipv4Addr::new(1, 1, 1, 4);
+    let deadline = lab
+        .device(r1)
+        .unwrap()
+        .ospf_neighbors()
+        .iter()
+        .find(|n| n.router_id == rid)
+        .unwrap()
+        .dead_at;
+    lab.with_device_mut(r4.device, |d| {
+        d.set_ospf_passive(r4.interface, true).unwrap()
+    })
+    .unwrap();
+    lab.run_until(SimTime(deadline.0 - 1)).unwrap();
+    assert!(
+        lab.device(r1)
+            .unwrap()
+            .ospf_neighbors()
+            .iter()
+            .any(|n| n.router_id == rid)
+    );
+    lab.run_until(deadline).unwrap();
+    assert!(
+        lab.device(r1)
+            .unwrap()
+            .ospf_neighbors()
+            .iter()
+            .all(|n| n.router_id != rid)
+    );
+}

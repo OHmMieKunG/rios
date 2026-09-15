@@ -35,32 +35,53 @@ fn rank(source: RouteSource) -> u8 {
         _ => 3,
     }
 }
-fn install(routes: &mut BTreeMap<Ipv4Network, OspfSpfRoute>, route: OspfSpfRoute) {
-    if route.metric >= 0x00ff_ffff {
-        return;
-    }
-    let preference = |route: &OspfSpfRoute| {
+impl OspfSpfRoute {
+    /// OSPF path preference, including E2 internal-cost tie breaking.
+    pub fn preference(&self) -> (u8, u32, u32, Ipv4Addr, Ipv4Addr) {
         (
-            rank(route.source),
-            route.metric,
-            route.internal_cost,
-            route.origin,
-            route.first_hop,
+            rank(self.source),
+            self.metric,
+            self.internal_cost,
+            self.origin,
+            self.first_hop,
         )
-    };
-    if routes
-        .get(&route.prefix)
-        .is_none_or(|old| preference(&route) < preference(old))
+    }
+}
+fn install(routes: &mut BTreeMap<Ipv4Network, OspfSpfRoute>, route: OspfSpfRoute) {
+    if route.metric < 0x00ff_ffff
+        && routes
+            .get(&route.prefix)
+            .is_none_or(|old| route.preference() < old.preference())
     {
         routes.insert(route.prefix, route);
     }
 }
-/// Calculate one area's intra-area, summary, and external prefixes.
-/// Links without a reciprocal advertisement cannot create reachability.
+/// Reachability of an ASBR, used when an ABR originates Type 4 summaries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OspfAsbrPath {
+    pub metric: u32,
+    pub first_hop: Ipv4Addr,
+    pub inter_area: bool,
+}
+/// One area's prefixes and ASBR paths.
+#[derive(Debug, Default)]
+pub struct OspfSpfResult {
+    pub routes: BTreeMap<Ipv4Network, OspfSpfRoute>,
+    pub asbrs: BTreeMap<Ipv4Addr, OspfAsbrPath>,
+}
+/// Calculate prefix routes for callers that do not originate summaries.
 pub fn ospf_spf<'a>(
     self_id: Ipv4Addr,
     lsas: impl IntoIterator<Item = &'a Lsa>,
 ) -> BTreeMap<Ipv4Network, OspfSpfRoute> {
+    ospf_calculate(self_id, lsas).routes
+}
+/// Calculate one area's intra-area, summary, and external prefixes.
+/// Links without a reciprocal advertisement cannot create reachability.
+pub fn ospf_calculate<'a>(
+    self_id: Ipv4Addr,
+    lsas: impl IntoIterator<Item = &'a Lsa>,
+) -> OspfSpfResult {
     let lsas: Vec<_> = lsas
         .into_iter()
         .filter(|lsa| lsa.age < LSA_MAX_AGE)
@@ -289,7 +310,34 @@ pub fn ospf_spf<'a>(
             );
         }
     }
-    routes
+    let mut asbrs: BTreeMap<_, _> = asbr_paths
+        .into_iter()
+        .map(|(id, (metric, first_hop))| {
+            (
+                id,
+                OspfAsbrPath {
+                    metric,
+                    first_hop,
+                    inter_area: true,
+                },
+            )
+        })
+        .collect();
+    for (id, (flags, _)) in &routers {
+        if flags & 2 != 0
+            && let Some((metric, hop)) = paths.get(&Vertex::Router(*id))
+        {
+            asbrs.insert(
+                *id,
+                OspfAsbrPath {
+                    metric: *metric,
+                    first_hop: hop.unwrap_or(self_id),
+                    inter_area: false,
+                },
+            );
+        }
+    }
+    OspfSpfResult { routes, asbrs }
 }
 
 #[cfg(test)]

@@ -390,16 +390,7 @@ impl Lab {
             .ok_or_else(|| LabError::UnknownDevice(device.0.to_string()))?
             .ospf_tick(now);
         self.emit_ospf(device, packets)?;
-        let next = self
-            .now()
-            .0
-            .checked_add(1_000_000)
-            .ok_or(LabError::Capacity)?;
-        self.events.schedule_at(
-            SimTime(next),
-            SimulationEvent::OspfHello { device, generation },
-        )?;
-        Ok(())
+        self.schedule_ospf_timer(device)
     }
 
     fn send_stp_bpdus(

@@ -455,16 +455,21 @@ impl Lab {
         Ok(())
     }
     pub(crate) fn schedule_ospf_now(&mut self, device: DeviceId) -> Result<(), LabError> {
+        self.schedule_ospf_at(device, self.now())
+    }
+    pub(crate) fn schedule_ospf_timer(&mut self, device: DeviceId) -> Result<(), LabError> {
+        let deadline = self.device(device)?.ospf_next_deadline(self.now());
+        self.schedule_ospf_at(device, deadline)
+    }
+    fn schedule_ospf_at(&mut self, device: DeviceId, deadline: SimTime) -> Result<(), LabError> {
         if self.device(device)?.running_config().ospf.is_none() {
             return Ok(());
         }
         let generation = self.ospf_generations.entry(device).or_default();
         *generation = generation.checked_add(1).ok_or(LabError::Capacity)?;
         let generation = *generation;
-        self.events.schedule_at(
-            self.now(),
-            SimulationEvent::OspfHello { device, generation },
-        )?;
+        self.events
+            .schedule_at(deadline, SimulationEvent::OspfHello { device, generation })?;
         Ok(())
     }
     pub(crate) fn schedule_stp_now(&mut self, device: DeviceId) -> Result<(), LabError> {

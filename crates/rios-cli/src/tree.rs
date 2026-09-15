@@ -51,6 +51,10 @@ pub(crate) enum Action {
     Dot1q,
     RouterOspf,
     OspfNetwork,
+    OspfDefault,
+    NoOspfDefault,
+    OspfRedistribute,
+    NoOspfRedistribute,
     OspfRouterId,
     NoOspfRouterId,
     OspfPassive,
@@ -551,6 +555,36 @@ pub(crate) fn tree(mode: CliMode) -> Node {
                 mode,
                 CliMode::RouterConfiguration(crate::RoutingProtocol::Ospf)
             ) {
+                root.add(
+                    &[
+                        ("default-information", "Default route origination"),
+                        ("originate", "Originate default Type 5 LSA"),
+                    ],
+                    OspfDefault,
+                );
+                root.add(
+                    &[
+                        ("no", ""),
+                        ("default-information", ""),
+                        ("originate", "Stop default origination"),
+                    ],
+                    NoOspfDefault,
+                );
+                root.add(
+                    &[
+                        ("redistribute", "Redistribute routes"),
+                        ("static", "Reachable static routes"),
+                    ],
+                    OspfRedistribute,
+                );
+                root.add(
+                    &[
+                        ("no", ""),
+                        ("redistribute", ""),
+                        ("static", "Stop static redistribution"),
+                    ],
+                    NoOspfRedistribute,
+                );
                 root.add(&[("router-id", "Set OSPF router ID")], OspfRouterId);
                 root.add(
                     &[("no", ""), ("router-id", "Select router ID automatically")],

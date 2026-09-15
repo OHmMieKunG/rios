@@ -1,7 +1,9 @@
 //! OSPF device integration: interface selection, neighbors, elections and packet actions.
+mod config;
 mod database;
 mod display;
 mod election;
+mod summaries;
 use crate::*;
 use rios_config::{OspfConfig, OspfInterfaceConfig, OspfNetworkConfig, OspfNetworkType};
 use rios_ipv4::{Ipv4Network, Route};
@@ -70,127 +72,6 @@ pub(super) struct OspfRuntime {
     sequence: u32,
 }
 impl Device {
-    /// Create or select the device's single OSPF process.
-    pub fn set_ospf_process(&mut self, process_id: u16) -> Result<(), DeviceError> {
-        if !self.supports_routing() {
-            return Err(DeviceError::OspfUnsupported);
-        }
-        if process_id == 0 {
-            return Err(DeviceError::InvalidOspfProcess);
-        }
-        match &mut self.running_config.ospf {
-            Some(config) => config.process_id = process_id,
-            None => {
-                self.running_config.ospf = Some(OspfConfig {
-                    process_id,
-                    networks: BTreeSet::new(),
-                    router_id: None,
-                    passive_interfaces: BTreeSet::new(),
-                })
-            }
-        }
-        Ok(())
-    }
-    /// Select an area for matching interfaces. More-specific wildcard statements win.
-    pub fn add_ospf_network(&mut self, network: OspfNetworkConfig) -> Result<(), DeviceError> {
-        let config = self
-            .running_config
-            .ospf
-            .as_mut()
-            .ok_or(DeviceError::InvalidOspfProcess)?;
-        if config.networks.len() >= 1024 && !config.networks.contains(&network) {
-            return Err(DeviceError::InvalidOspfConfig);
-        }
-        config.networks.insert(network);
-        Ok(())
-    }
-    /// Configure a stable process identity; changing it restarts this process runtime.
-    pub fn set_ospf_router_id(&mut self, id: Option<Ipv4Addr>) -> Result<(), DeviceError> {
-        if id.is_some_and(|id| id.is_unspecified() || id.is_multicast() || id.is_broadcast()) {
-            return Err(DeviceError::InvalidOspfConfig);
-        }
-        self.running_config
-            .ospf
-            .as_mut()
-            .ok_or(DeviceError::InvalidOspfProcess)?
-            .router_id = id;
-        self.ospf_runtime = OspfRuntime::default();
-        Ok(())
-    }
-    /// Suppress Hellos and adjacencies while retaining the interface as a stub network.
-    pub fn set_ospf_passive(
-        &mut self,
-        interface: InterfaceId,
-        passive: bool,
-    ) -> Result<(), DeviceError> {
-        if !self.running_config.interfaces.contains_key(&interface) {
-            return Err(DeviceError::MissingInterface);
-        }
-        let config = self
-            .running_config
-            .ospf
-            .as_mut()
-            .ok_or(DeviceError::InvalidOspfProcess)?;
-        if passive {
-            config.passive_interfaces.insert(interface);
-        } else {
-            config.passive_interfaces.remove(&interface);
-        }
-        Ok(())
-    }
-    /// Validate and update interface protocol policy. Timer/network changes restart neighbors.
-    pub fn set_ospf_interface(
-        &mut self,
-        interface: InterfaceId,
-        policy: OspfInterfaceConfig,
-    ) -> Result<(), DeviceError> {
-        if !self.supports_routing() {
-            return Err(DeviceError::OspfUnsupported);
-        }
-        if policy.cost == 0
-            || policy.hello_interval == 0
-            || policy.dead_interval == 0
-            || policy.dead_interval > 65535
-        {
-            return Err(DeviceError::InvalidOspfConfig);
-        }
-        self.running_config
-            .interfaces
-            .get_mut(&interface)
-            .ok_or(DeviceError::MissingInterface)?
-            .ospf = policy;
-        Ok(())
-    }
-    /// Operational interfaces with area assignment, including passive stub interfaces.
-    pub fn ospf_interfaces(&self) -> Vec<(InterfaceId, Ipv4InterfaceConfig, u32)> {
-        let Some(config) = &self.running_config.ospf else {
-            return vec![];
-        };
-        self.running_config
-            .interfaces
-            .keys()
-            .filter_map(|id| {
-                let ip = self.interface_ipv4(*id)?;
-                let area = config
-                    .networks
-                    .iter()
-                    .filter(|network| network.matches(ip.address()))
-                    .min_by_key(|n| (u32::from(n.wildcard).count_ones(), *n))?
-                    .area;
-                self.protocol_up(*id).then_some((*id, ip, area))
-            })
-            .collect()
-    }
-    fn ospf_passive(&self, id: InterfaceId) -> bool {
-        self.interfaces
-            .get(&id)
-            .is_none_or(|port| port.kind == InterfaceKind::Loopback)
-            || self
-                .running_config
-                .ospf
-                .as_ref()
-                .is_some_and(|c| c.passive_interfaces.contains(&id))
-    }
     fn ospf_emit(
         &self,
         id: InterfaceId,
@@ -278,6 +159,40 @@ impl Device {
             .neighbors
             .retain(|(id, _), neighbor| ids.contains(id) && neighbor.info.dead_at > now);
     }
+    /// Earliest protocol deadline, with a one-second maintenance bound for carrier changes.
+    pub fn ospf_next_deadline(&self, now: SimTime) -> SimTime {
+        let mut next = SimTime(now.0.saturating_add(1_000_000));
+        let mut consider = |time: SimTime| {
+            if time > now {
+                next = next.min(time);
+            }
+        };
+        for runtime in self.ospf_runtime.interfaces.values() {
+            consider(runtime.hello_due);
+            consider(runtime.wait_until);
+        }
+        for neighbor in self.ospf_runtime.neighbors.values() {
+            consider(neighbor.info.dead_at);
+            if let Some(time) = neighbor
+                .exchange
+                .as_ref()
+                .and_then(OspfExchange::next_deadline)
+            {
+                consider(time);
+            }
+        }
+        for stored in self.ospf_runtime.database.values() {
+            let age = if Some(stored.lsa.advertising_router) == self.ospf_runtime.router_id {
+                1800
+            } else {
+                LSA_MAX_AGE
+            };
+            consider(SimTime(stored.installed.0.saturating_add(
+                u64::from(age.saturating_sub(stored.lsa.age)) * 1_000_000,
+            )));
+        }
+        next
+    }
     /// Drive Hello, adjacency retransmission, database aging and election timers in virtual time.
     pub fn ospf_tick(&mut self, now: SimTime) -> Vec<OspfTransmission> {
         self.ospf_prepare(now);
@@ -361,6 +276,33 @@ impl Device {
         {
             return out;
         }
+        if source.is_unspecified()
+            || source.is_multicast()
+            || source.is_broadcast()
+            || packet.router_id.is_broadcast()
+        {
+            return out;
+        }
+        if let OspfBody::LinkStateUpdate(lsas) = &packet.body {
+            let new: BTreeSet<_> = lsas
+                .iter()
+                .map(|lsa| {
+                    (
+                        if matches!(lsa.body, LsaBody::External { .. }) {
+                            0
+                        } else {
+                            packet.area
+                        },
+                        lsa.key(),
+                    )
+                })
+                .filter(|key| !self.ospf_runtime.database.contains_key(key))
+                .collect();
+            // Do not acknowledge state that cannot enter the bounded database.
+            if self.ospf_runtime.database.len() + new.len() > OSPF_DATABASE_LIMIT {
+                return out;
+            }
+        }
         let key = (interface, packet.router_id);
         if let OspfBody::Hello(hello) = packet.body {
             if hello.hello_interval != runtime.policy.hello_interval
@@ -443,12 +385,5 @@ impl Device {
         }
         out.extend(self.ospf_tick(now));
         out
-    }
-    /// Compatibility timer entry point; normal maintenance removes expired neighbors on each tick.
-    pub fn expire_ospf_neighbor(&mut self, router_id: Ipv4Addr, now: SimTime) {
-        self.ospf_runtime
-            .neighbors
-            .retain(|(_, id), n| *id != router_id || n.info.dead_at > now);
-        self.recompute_ospf_routes(now);
     }
 }
