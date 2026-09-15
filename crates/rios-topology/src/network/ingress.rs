@@ -51,7 +51,13 @@ impl Lab {
             self.handle_dhcp(interface, datagram)?;
             return Ok(());
         }
-        if packet.protocol == IpProtocol::Ospf && packet.destination == OSPF_ALL_ROUTERS {
+        if packet.protocol == IpProtocol::Ospf
+            && (packet.destination == OSPF_ALL_ROUTERS
+                || packet.destination == Ipv4Addr::new(224, 0, 0, 6)
+                || self
+                    .device(interface.device)?
+                    .owns_any_ipv4(packet.destination))
+        {
             return self.handle_ospf(interface, packet);
         }
         if self.device(interface.device)?.ipv4_forwarding_enabled() {

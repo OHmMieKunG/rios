@@ -9,7 +9,7 @@ use rios_protocol::{
     ArpOperation, ArpPacket, DhcpMessage, DhcpMessageType, IcmpEcho, IcmpError, IcmpErrorKind,
     IcmpKind, UdpDatagram,
 };
-use rios_routing::{OSPF_ALL_ROUTERS, OspfPacket};
+use rios_routing::{OSPF_ALL_ROUTERS, OspfV2Packet};
 use rios_simulator::DeviceId;
 use std::net::Ipv4Addr;
 

@@ -2,6 +2,8 @@
 #![forbid(unsafe_code)]
 mod acl;
 mod nat;
+mod ospf;
+pub use ospf::{OspfInterfaceConfig, OspfNetworkType};
 mod stp;
 pub use acl::{AccessList, AclEntry, AclId, AclKind, AclProtocol, AddressMatch, PortMatch};
 pub use nat::{NatPool, NatPoolRule, NatTransport, StaticNat};
@@ -26,6 +28,8 @@ pub enum AdminState {
 /// Authoritative configuration for one interface.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InterfaceConfig {
+    #[serde(default)]
+    pub ospf: OspfInterfaceConfig,
     #[serde(default)]
     pub spanning_tree: StpPortConfig,
     #[serde(default)]
@@ -202,6 +206,10 @@ impl OspfNetworkConfig {
 pub struct OspfConfig {
     pub process_id: u16,
     pub networks: BTreeSet<OspfNetworkConfig>,
+    #[serde(default)]
+    pub router_id: Option<Ipv4Addr>,
+    #[serde(default)]
+    pub passive_interfaces: BTreeSet<InterfaceId>,
 }
 
 /// Stable identifier for a configured DHCP pool.
@@ -379,6 +387,7 @@ impl RunningConfig {
             if let Some(helper) = config.helper_address {
                 writeln!(out, " ip helper-address {helper}").unwrap();
             }
+            config.ospf.render(&mut out);
             let stp = &config.spanning_tree;
             if stp.priority != 128 {
                 writeln!(out, " spanning-tree port-priority {}", stp.priority).unwrap();
@@ -549,6 +558,14 @@ impl RunningConfig {
         }
         if let Some(ospf) = &self.ospf {
             writeln!(out, "router ospf {}", ospf.process_id).unwrap();
+            if let Some(id) = ospf.router_id {
+                writeln!(out, " router-id {id}").unwrap();
+            }
+            for id in &ospf.passive_interfaces {
+                if let Some(interface) = self.interfaces.get(id) {
+                    writeln!(out, " passive-interface {}", interface.name).unwrap();
+                }
+            }
             for network in &ospf.networks {
                 writeln!(
                     out,

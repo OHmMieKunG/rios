@@ -171,7 +171,7 @@ fn ospf_and_router_originated_ping_use_subinterface_identity() {
     .unwrap();
     ospf(&mut lab, r1);
     ospf(&mut lab, r2);
-    lab.run_until(SimTime::from_millis(20_100)).unwrap();
+    lab.run_until(SimTime::from_millis(45_100)).unwrap();
     let route = lab
         .device(r1)
         .unwrap()

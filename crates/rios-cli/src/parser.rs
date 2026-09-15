@@ -190,7 +190,14 @@ fn parse_input(
         | Action::SwitchportTrunkAllowed
         | Action::DhcpPool
         | Action::DhcpDefaultRouter => 1,
-        Action::RouterOspf => 1,
+        Action::RouterOspf
+        | Action::OspfRouterId
+        | Action::OspfPassive
+        | Action::NoOspfPassive
+        | Action::OspfCost
+        | Action::OspfPriority
+        | Action::OspfHello
+        | Action::OspfDead => 1,
         Action::OspfNetwork => 4,
         Action::Interfaces
         | Action::Interface
@@ -292,6 +299,9 @@ fn parse_input(
                     | Command::ShowArp
                     | Command::ShowMacAddressTable
                     | Command::ShowVlanBrief
+                    | Command::ShowIpOspf
+                    | Command::ShowIpProtocols
+                    | Command::ShowIpOspfNeighborDetail
                     | Command::ShowIpOspfNeighbor
                     | Command::ShowIpOspfInterface
                     | Command::ShowIpOspfDatabase
@@ -520,6 +530,51 @@ fn parse_input(
                     .map_err(|_| invalid(args[3].offset, "expected a numeric area ID"))?,
             })
         }
+        OspfRouterId => Command::SetOspfRouterId(Some(parse_ip(0)?)),
+        NoOspfRouterId => Command::SetOspfRouterId(None),
+        OspfPassive | NoOspfPassive => {
+            let (interface, _) = canonical_interface(args[0].text)
+                .map_err(|e| invalid(args[0].offset, e.to_string()))?;
+            Command::SetOspfPassive {
+                interface,
+                passive: matches!(action, OspfPassive),
+            }
+        }
+        OspfCost | OspfPriority | OspfHello | OspfDead => {
+            let value = args[0]
+                .text
+                .parse::<u32>()
+                .map_err(|_| invalid(args[0].offset, "expected an unsigned integer"))?;
+            if (value == 0 && !matches!(action, OspfPriority))
+                || value
+                    > if matches!(action, OspfPriority) {
+                        255
+                    } else {
+                        65535
+                    }
+            {
+                return Err(invalid(args[0].offset, "OSPF value out of range"));
+            }
+            Command::SetOspfPort(match action {
+                OspfCost => OspfPortOption::Cost(value as u16),
+                OspfPriority => OspfPortOption::Priority(value as u8),
+                OspfHello => OspfPortOption::Hello(value as u16),
+                _ => OspfPortOption::Dead(value),
+            })
+        }
+        NoOspfCost => Command::SetOspfPort(OspfPortOption::Cost(1)),
+        NoOspfPriority => Command::SetOspfPort(OspfPortOption::Priority(1)),
+        NoOspfHello => Command::SetOspfPort(OspfPortOption::Hello(10)),
+        NoOspfDead => Command::SetOspfPort(OspfPortOption::Dead(40)),
+        OspfPointToPoint => Command::SetOspfPort(OspfPortOption::Network(
+            rios_config::OspfNetworkType::PointToPoint,
+        )),
+        OspfBroadcast => Command::SetOspfPort(OspfPortOption::Network(
+            rios_config::OspfNetworkType::Broadcast,
+        )),
+        OspfSummary => Command::ShowIpOspf,
+        IpProtocols => Command::ShowIpProtocols,
+        OspfNeighborDetail => Command::ShowIpOspfNeighborDetail,
         OspfNeighbor => Command::ShowIpOspfNeighbor,
         OspfInterface => Command::ShowIpOspfInterface,
         OspfDatabase => Command::ShowIpOspfDatabase,
@@ -992,6 +1047,13 @@ pub fn suggestions(
                 | Action::NativeVlan
                 | Action::SwitchportAccessVlan
                 | Action::SwitchportTrunkAllowed
+                | Action::OspfRouterId
+                | Action::OspfPassive
+                | Action::NoOspfPassive
+                | Action::OspfCost
+                | Action::OspfPriority
+                | Action::OspfHello
+                | Action::OspfDead
                 | Action::RouterOspf
                 | Action::OspfNetwork
                 | Action::DhcpPool

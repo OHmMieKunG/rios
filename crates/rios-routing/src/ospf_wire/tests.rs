@@ -110,8 +110,6 @@ fn hostile_lsa_count_is_rejected_before_allocation() {
     let sum = checksum(&bytes);
     bytes[12..14].copy_from_slice(&sum.to_be_bytes());
     assert_eq!(OspfV2Packet::decode(&bytes), Err(WireError::Malformed));
-    // The legacy decoder is still used by the device until the runtime migration.
-    assert!(crate::OspfPacket::decode(&bytes).is_err());
 }
 #[test]
 fn arbitrary_byte_buffers_never_panic() {

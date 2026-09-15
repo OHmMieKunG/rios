@@ -57,6 +57,9 @@ fn executable_after_do(command: &Command) -> bool {
             | Command::ShowArp
             | Command::ShowMacAddressTable
             | Command::ShowVlanBrief
+            | Command::ShowIpOspf
+            | Command::ShowIpProtocols
+            | Command::ShowIpOspfNeighborDetail
             | Command::ShowIpOspfNeighbor
             | Command::ShowIpOspfInterface
             | Command::ShowIpOspfDatabase
@@ -127,6 +130,12 @@ pub fn execute_at(
                 InterfaceConfiguration(_) | InterfaceRangeConfiguration(_, _)
             )
         }
+        Command::SetOspfPort(_) => matches!(
+            mode,
+            InterfaceConfiguration(_)
+                | SubinterfaceConfiguration(_)
+                | InterfaceRangeConfiguration(_, _)
+        ),
         Command::SetNamedAccessGroup { .. } => matches!(
             mode,
             InterfaceConfiguration(_) | SubinterfaceConfiguration(_)
@@ -151,7 +160,9 @@ pub fn execute_at(
         Command::EnterVlan(_) => matches!(mode, GlobalConfiguration | VlanConfiguration(_)),
         Command::EnterRouterOspf(_) => mode == GlobalConfiguration,
         Command::NameVlan(_) => matches!(mode, VlanConfiguration(_)),
-        Command::AddOspfNetwork(_) => matches!(mode, RouterConfiguration(RoutingProtocol::Ospf)),
+        Command::SetOspfRouterId(_)
+        | Command::SetOspfPassive { .. }
+        | Command::AddOspfNetwork(_) => matches!(mode, RouterConfiguration(RoutingProtocol::Ospf)),
         Command::EnterInterface(_) | Command::EnterInterfaceRange { .. } | Command::End => {
             config_mode
         }
@@ -195,6 +206,9 @@ pub fn execute_at(
         | Command::ShowArp
         | Command::ShowMacAddressTable
         | Command::ShowVlanBrief
+        | Command::ShowIpOspf
+        | Command::ShowIpProtocols
+        | Command::ShowIpOspfNeighborDetail
         | Command::ShowIpOspfNeighbor
         | Command::ShowIpOspfInterface
         | Command::ShowIpOspfDatabase
@@ -371,6 +385,29 @@ pub fn execute_at(
             session.mode = RouterConfiguration(RoutingProtocol::Ospf);
         }
         Command::AddOspfNetwork(network) => device.add_ospf_network(network)?,
+        Command::SetOspfRouterId(id) => device.set_ospf_router_id(id)?,
+        Command::SetOspfPassive { interface, passive } => {
+            let id = device
+                .find_interface(&interface)
+                .ok_or(rios_device::DeviceError::MissingInterface)?;
+            device.set_ospf_passive(id, passive)?;
+        }
+        Command::SetOspfPort(option) => edit_interfaces(device, mode, |device, id| {
+            let mut policy = device.running_config().interfaces[&id].ospf;
+            match option {
+                OspfPortOption::Cost(v) => policy.cost = v,
+                OspfPortOption::Priority(v) => policy.priority = v,
+                OspfPortOption::Hello(v) => policy.hello_interval = v,
+                OspfPortOption::Dead(v) => policy.dead_interval = v,
+                OspfPortOption::Network(v) => policy.network_type = v,
+            }
+            device.set_ospf_interface(id, policy)
+        })?,
+        Command::ShowIpOspf => result.output = device.show_ip_ospf(),
+        Command::ShowIpProtocols => result.output = device.show_ip_protocols(),
+        Command::ShowIpOspfNeighborDetail => {
+            result.output = device.show_ip_ospf_neighbor_detail(now)
+        }
         Command::NameVlan(name) => {
             if let VlanConfiguration(vlan) = mode {
                 device.set_vlan_name(vlan, &name)?;

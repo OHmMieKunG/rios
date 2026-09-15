@@ -488,7 +488,7 @@ fn ospf_forms_neighbors_installs_routes_and_expires_them() {
         })
         .unwrap();
     }
-    lab.run_until(SimTime::from_millis(20_010)).unwrap();
+    lab.run_until(SimTime::from_millis(45_010)).unwrap();
     assert!(
         lab.device(r1)
             .unwrap()
@@ -513,7 +513,7 @@ fn ospf_forms_neighbors_installs_routes_and_expires_them() {
     );
 
     lab.set_link_state(LinkId(1), LinkState::Down).unwrap();
-    lab.run_until(SimTime::from_millis(61_000)).unwrap();
+    lab.run_until(SimTime::from_millis(91_000)).unwrap();
     assert!(
         !lab.device(r1)
             .unwrap()

@@ -403,3 +403,29 @@ time and periodic events; no sleeping threads are involved.
 Unit tests cover BPDU/LLC codecs, timed transitions, synchronization, priorities,
 costs, and guard recovery. Topology tests verify independent VLAN roots, rapid
 triangle failover, single-copy flooding, and blocked ingress isolation from SVIs.
+
+## OSPFv2 adjacency and database exchange
+
+OSPF now sends standard Hello, Database Description, Link State Request, Link
+State Update, and Link State Acknowledgment packets. The former private router
+LSA representation has been removed. Broadcast interfaces wait for election,
+select DR/BDR by priority and router ID without preemption, and keep DROther
+pairs at TwoWay. Point-to-point interfaces skip election. ExStart, Exchange,
+Loading, and Full result from packet exchanges, with bounded request and
+retransmission tables. Unicast protocol traffic resolves ARP on its selected
+interface. Inbound and outbound ACLs also apply to OSPF traffic.
+
+Per-interface cost, priority, hello/dead intervals and network type, process
+router ID, and passive interfaces are structured configuration with CLI replay.
+Router and network LSAs feed weighted SPF; remote advertisements age out,
+local advertisements refresh, and received self-originated LSAs trigger
+fightback. Timers use virtual time; maintenance currently runs at one-second
+resolution. Neighbor count is capped at 256 and LSDB size at 4096. DBD and
+request/ack packets are divided to fit the interface MTU. An individual LSA
+larger than the interface MTU is not fragmented and cannot be synchronized.
+Authentication, virtual links, NBMA, and opaque LSAs are not implemented.
+
+Legacy topology tests now allow the default 40-second broadcast Wait timer.
+Tests needing rapid adjacency can explicitly select `ip ospf network
+point-to-point`. Multi-area summaries and external origination follow this
+adjacency milestone; their wire formats and SPF calculations already exist.

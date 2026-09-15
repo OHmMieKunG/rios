@@ -1,7 +1,5 @@
 use crate::*;
 use rios_ethernet::MacAddress;
-use rios_ipv4::{IpProtocol, Ipv4Packet};
-use rios_routing::{HELLO_INTERVAL_MS, OSPF_ALL_ROUTERS};
 use rios_switching::{STP_HELLO_MS, STP_MULTICAST, StpBpdu};
 impl Lab {
     /// Move a frame into a virtual cable. Delivery occurs only when events are stepped.
@@ -338,17 +336,6 @@ impl Lab {
                 self.send_ospf_packets(device, generation)?;
                 return Ok(None);
             }
-            SimulationEvent::OspfDead {
-                device,
-                router_id,
-                deadline,
-            } => {
-                self.devices
-                    .get_mut(&device)
-                    .ok_or_else(|| LabError::UnknownDevice(device.0.to_string()))?
-                    .expire_ospf_neighbor(router_id, deadline);
-                return Ok(None);
-            }
             SimulationEvent::StpHello { device, generation } => {
                 self.send_stp_bpdus(device, generation)?;
                 return Ok(None);
@@ -396,48 +383,17 @@ impl Lab {
         if self.ospf_generations.get(&device) != Some(&generation) {
             return Ok(());
         }
-        let interfaces: Vec<_> = self
-            .device(device)?
-            .ospf_interfaces()
-            .into_iter()
-            .map(|(id, _, _)| id)
-            .collect();
-        for interface in interfaces {
-            let Some((source, packets)) = self
-                .devices
-                .get_mut(&device)
-                .unwrap()
-                .ospf_packets(interface)
-            else {
-                continue;
-            };
-            let endpoint = InterfaceRef { device, interface };
-            let source_mac = self.device(device)?.interfaces()[&interface].mac_address;
-            for packet in packets {
-                let ipv4 = Ipv4Packet {
-                    source,
-                    destination: OSPF_ALL_ROUTERS,
-                    ttl: 1,
-                    protocol: IpProtocol::Ospf,
-                    payload: packet.encode(),
-                };
-                self.transmit_network_frame(
-                    endpoint,
-                    EthernetFrame {
-                        destination: MacAddress([0x01, 0x00, 0x5e, 0x00, 0x00, 0x05]),
-                        source: source_mac,
-                        ethertype: EtherType::Ipv4,
-                        payload: ipv4
-                            .encode()
-                            .map_err(|error| LabError::Protocol(error.to_string()))?,
-                    },
-                )?;
-            }
-        }
+        let now = self.now();
+        let packets = self
+            .devices
+            .get_mut(&device)
+            .ok_or_else(|| LabError::UnknownDevice(device.0.to_string()))?
+            .ospf_tick(now);
+        self.emit_ospf(device, packets)?;
         let next = self
             .now()
             .0
-            .checked_add(HELLO_INTERVAL_MS * 1000)
+            .checked_add(1_000_000)
             .ok_or(LabError::Capacity)?;
         self.events.schedule_at(
             SimTime(next),

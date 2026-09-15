@@ -951,3 +951,62 @@ fn spanning_tree_policy_configures_and_replays() {
             .any(|item| item.word == "priority")
     );
 }
+
+#[test]
+fn advanced_ospf_policy_abbreviates_validates_and_replays() {
+    let mut router = Device::standalone();
+    let mut session = CliSession {
+        mode: CliMode::GlobalConfiguration,
+    };
+    for command in [
+        "int gi0/0",
+        "ip ospf cost 25",
+        "ip ospf priority 0",
+        "ip ospf hello-interval 2",
+        "ip ospf dead-interval 8",
+        "ip ospf net p",
+        "exit",
+        "router ospf 1",
+        "router-id 1.1.1.1",
+        "passive-interface gi0/1",
+        "network 10.0.0.0 0.0.0.255 area 0",
+        "end",
+    ] {
+        run(&mut router, &mut session, command).unwrap();
+    }
+    let rendered = router.running_config().render();
+    let mut restored = Device::standalone();
+    load_configuration(&mut restored, &rendered).unwrap();
+    assert_eq!(restored.running_config(), router.running_config());
+    for command in ["sh ip ospf", "sh ip protocols", "sh ip ospf nei det"] {
+        run(&mut router, &mut session, command).unwrap();
+    }
+    for command in [
+        "conf t",
+        "router ospf 1",
+        "no passive-interface gi0/1",
+        "no router-id",
+        "int gi0/0",
+        "no ip ospf cost",
+        "no ip ospf priority",
+        "no ip ospf hello-interval",
+        "no ip ospf dead-interval",
+        "no ip ospf network",
+    ] {
+        run(&mut router, &mut session, command).unwrap();
+    }
+    let id = router.find_interface("GigabitEthernet0/0").unwrap();
+    assert_eq!(
+        router.running_config().interfaces[&id].ospf,
+        rios_config::OspfInterfaceConfig::default()
+    );
+    assert!(parse("ip ospf cost 0", session.mode).is_err());
+    assert!(parse("ip ospf priority 256", session.mode).is_err());
+    assert!(
+        suggestions("ip ospf hello-interval ", session.mode, &[])
+            .unwrap()
+            .iter()
+            .any(|s| s.word == "<1-65535>")
+    );
+    assert!(run(&mut router, &mut session, "do sh ip ospf nei det").is_ok());
+}

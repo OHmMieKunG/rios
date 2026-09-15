@@ -12,6 +12,8 @@ pub use named_acl::AclLog;
 mod nat;
 mod network;
 mod ospf;
+use ospf::OspfRuntime;
+pub use ospf::{OspfNeighborInfo, OspfTransmission};
 mod stp;
 mod subinterface;
 mod tcp;
@@ -25,7 +27,6 @@ use rios_config::{
 };
 use rios_ethernet::{EthernetFrame, MacAddress};
 use rios_ipv4::Ipv4InterfaceConfig;
-use rios_routing::{OspfNeighbor, RouterLsa};
 use rios_simulator::{DeviceId, InterfaceId, LinkState};
 use rios_switching::{StpPortRole, StpPortState};
 use std::collections::{BTreeMap, BTreeSet};
@@ -145,15 +146,6 @@ pub struct Device {
     next_nat_port: u16,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct OspfRuntime {
-    router_id: Option<std::net::Ipv4Addr>,
-    neighbors: BTreeMap<std::net::Ipv4Addr, OspfNeighbor>,
-    database: BTreeMap<std::net::Ipv4Addr, RouterLsa>,
-    routes: Vec<rios_ipv4::Route>,
-    sequence: u32,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StpReceived {
     bpdu: rios_switching::StpBpdu,
@@ -208,8 +200,8 @@ pub enum DeviceError {
     DefaultVlan,
     #[error("OSPF process ID must be nonzero")]
     InvalidOspfProcess,
-    #[error("OSPF network statements in this phase must use one area")]
-    OspfAreaMismatch,
+    #[error("invalid OSPF interface timers, cost, router ID, or capacity")]
+    InvalidOspfConfig,
     #[error("OSPF requires a routing-capable device")]
     OspfUnsupported,
     #[error("access lists require a routing-capable device")]
@@ -425,6 +417,7 @@ impl Device {
         self.running_config.interfaces.insert(
             id,
             InterfaceConfig {
+                ospf: rios_config::OspfInterfaceConfig::default(),
                 spanning_tree: rios_config::StpPortConfig::default(),
                 channel_group: None,
                 port_channel: None,

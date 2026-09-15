@@ -51,6 +51,23 @@ pub(crate) enum Action {
     Dot1q,
     RouterOspf,
     OspfNetwork,
+    OspfRouterId,
+    NoOspfRouterId,
+    OspfPassive,
+    NoOspfPassive,
+    OspfCost,
+    OspfPriority,
+    OspfHello,
+    OspfDead,
+    NoOspfCost,
+    NoOspfPriority,
+    NoOspfHello,
+    NoOspfDead,
+    OspfPointToPoint,
+    OspfBroadcast,
+    OspfSummary,
+    IpProtocols,
+    OspfNeighborDetail,
     OspfNeighbor,
     OspfInterface,
     OspfDatabase,
@@ -141,6 +158,10 @@ impl Action {
             Self::Do => &["<EXEC-command>"],
             Self::SwitchportTrunkAllowed => &["<vlan-list>"],
             Self::VlanName => &["<name>"],
+            Self::OspfRouterId => &["<router-id>"],
+            Self::OspfPassive | Self::NoOspfPassive => &["<interface>"],
+            Self::OspfCost | Self::OspfHello | Self::OspfDead => &["<1-65535>"],
+            Self::OspfPriority => &["<0-255>"],
             Self::RouterOspf => &["<process-id>"],
             Self::OspfNetwork => &["<address> <wildcard> area <area-id>"],
             Self::Ping => &["<ipv4>"],
@@ -275,6 +296,24 @@ pub(crate) fn tree(mode: CliMode) -> Node {
                     ("statistics", "NAT counters"),
                 ],
                 ShowNatStatistics,
+            );
+            root.add(
+                &[("show", ""), ("ip", ""), ("ospf", "OSPF process")],
+                OspfSummary,
+            );
+            root.add(
+                &[("show", ""), ("ip", ""), ("protocols", "Routing protocols")],
+                IpProtocols,
+            );
+            root.add(
+                &[
+                    ("show", ""),
+                    ("ip", ""),
+                    ("ospf", ""),
+                    ("neighbor", ""),
+                    ("detail", "Adjacency details"),
+                ],
+                OspfNeighborDetail,
             );
             for (word, help, action) in [
                 ("neighbor", "OSPF neighbors", OspfNeighbor),
@@ -512,9 +551,91 @@ pub(crate) fn tree(mode: CliMode) -> Node {
                 mode,
                 CliMode::RouterConfiguration(crate::RoutingProtocol::Ospf)
             ) {
+                root.add(&[("router-id", "Set OSPF router ID")], OspfRouterId);
+                root.add(
+                    &[("no", ""), ("router-id", "Select router ID automatically")],
+                    NoOspfRouterId,
+                );
+                root.add(
+                    &[("passive-interface", "Suppress adjacency on interface")],
+                    OspfPassive,
+                );
+                root.add(
+                    &[
+                        ("no", ""),
+                        ("passive-interface", "Enable adjacency on interface"),
+                    ],
+                    NoOspfPassive,
+                );
                 root.add(
                     &[("network", "Enable OSPF on matching interfaces")],
                     OspfNetwork,
+                );
+            }
+            if matches!(
+                mode,
+                CliMode::InterfaceConfiguration(_)
+                    | CliMode::SubinterfaceConfiguration(_)
+                    | CliMode::InterfaceRangeConfiguration(_, _)
+            ) {
+                for (word, help, set, reset) in [
+                    ("cost", "OSPF output cost", OspfCost, NoOspfCost),
+                    (
+                        "priority",
+                        "DR election priority",
+                        OspfPriority,
+                        NoOspfPriority,
+                    ),
+                    (
+                        "hello-interval",
+                        "Hello interval in seconds",
+                        OspfHello,
+                        NoOspfHello,
+                    ),
+                    (
+                        "dead-interval",
+                        "Neighbor dead interval in seconds",
+                        OspfDead,
+                        NoOspfDead,
+                    ),
+                ] {
+                    root.add(&[("ip", ""), ("ospf", "Interface OSPF"), (word, help)], set);
+                    root.add(
+                        &[
+                            ("no", ""),
+                            ("ip", ""),
+                            ("ospf", ""),
+                            (word, "Restore default"),
+                        ],
+                        reset,
+                    );
+                }
+                root.add(
+                    &[
+                        ("ip", ""),
+                        ("ospf", ""),
+                        ("network", "Network type"),
+                        ("point-to-point", "No DR election"),
+                    ],
+                    OspfPointToPoint,
+                );
+                root.add(
+                    &[
+                        ("ip", ""),
+                        ("ospf", ""),
+                        ("network", ""),
+                        ("broadcast", "DR and BDR election"),
+                    ],
+                    OspfBroadcast,
+                );
+                root.add(
+                    &[
+                        ("no", ""),
+                        ("ip", ""),
+                        ("ospf", ""),
+                        ("network", "Restore broadcast type"),
+                    ],
+                    OspfBroadcast,
                 );
             }
             if matches!(
@@ -674,6 +795,72 @@ pub(crate) fn tree(mode: CliMode) -> Node {
                         ("vlan", "Set allowed VLAN list"),
                     ],
                     SwitchportTrunkAllowed,
+                );
+            }
+            if matches!(
+                mode,
+                CliMode::InterfaceConfiguration(_)
+                    | CliMode::SubinterfaceConfiguration(_)
+                    | CliMode::InterfaceRangeConfiguration(_, _)
+            ) {
+                for (word, help, set, reset) in [
+                    ("cost", "OSPF output cost", OspfCost, NoOspfCost),
+                    (
+                        "priority",
+                        "DR election priority",
+                        OspfPriority,
+                        NoOspfPriority,
+                    ),
+                    (
+                        "hello-interval",
+                        "Hello interval in seconds",
+                        OspfHello,
+                        NoOspfHello,
+                    ),
+                    (
+                        "dead-interval",
+                        "Neighbor dead interval in seconds",
+                        OspfDead,
+                        NoOspfDead,
+                    ),
+                ] {
+                    root.add(&[("ip", ""), ("ospf", "Interface OSPF"), (word, help)], set);
+                    root.add(
+                        &[
+                            ("no", ""),
+                            ("ip", ""),
+                            ("ospf", ""),
+                            (word, "Restore default"),
+                        ],
+                        reset,
+                    );
+                }
+                root.add(
+                    &[
+                        ("ip", ""),
+                        ("ospf", ""),
+                        ("network", "Network type"),
+                        ("point-to-point", "No DR election"),
+                    ],
+                    OspfPointToPoint,
+                );
+                root.add(
+                    &[
+                        ("ip", ""),
+                        ("ospf", ""),
+                        ("network", ""),
+                        ("broadcast", "DR and BDR election"),
+                    ],
+                    OspfBroadcast,
+                );
+                root.add(
+                    &[
+                        ("no", ""),
+                        ("ip", ""),
+                        ("ospf", ""),
+                        ("network", "Restore broadcast type"),
+                    ],
+                    OspfBroadcast,
                 );
             }
             if matches!(

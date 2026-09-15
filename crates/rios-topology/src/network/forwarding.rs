@@ -51,6 +51,16 @@ impl Lab {
         let Some(route) = self.device(device)?.resolve_route(packet.destination) else {
             return Ok(false);
         };
+        self.send_ipv4_via(device, route, packet)
+    }
+
+    /// Resolve a neighbor on an explicitly selected interface, including link-local protocols.
+    pub(super) fn send_ipv4_via(
+        &mut self,
+        device: DeviceId,
+        route: ResolvedRoute,
+        packet: Ipv4Packet,
+    ) -> Result<bool, LabError> {
         let source = InterfaceRef {
             device,
             interface: route.interface,
@@ -67,6 +77,21 @@ impl Lab {
             return Ok(true);
         }
 
+        self.pending_ipv4.retain(|pending| pending.expires_at > now);
+        if self.pending_ipv4.len() >= 4096
+            || self
+                .pending_ipv4
+                .iter()
+                .filter(|pending| pending.source == source)
+                .count()
+                >= 256
+        {
+            self.devices
+                .get_mut(&device)
+                .ok_or(DropReason::QueueFull)?
+                .record_drop_reason(source.interface, DropReason::QueueFull)?;
+            return Ok(false);
+        }
         let request_needed = !self
             .pending_ipv4
             .iter()

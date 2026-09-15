@@ -59,11 +59,6 @@ pub(crate) enum SimulationEvent {
         device: rios_simulator::DeviceId,
         generation: u64,
     },
-    OspfDead {
-        device: rios_simulator::DeviceId,
-        router_id: std::net::Ipv4Addr,
-        deadline: SimTime,
-    },
     StpHello {
         device: rios_simulator::DeviceId,
         generation: u64,

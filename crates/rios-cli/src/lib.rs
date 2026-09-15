@@ -13,6 +13,15 @@ use rios_ipv4::{Ipv4InterfaceConfig, Ipv4Network};
 use rios_simulator::InterfaceId;
 use std::{collections::BTreeSet, net::Ipv4Addr};
 
+/// One independently configurable OSPF interface setting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OspfPortOption {
+    Cost(u16),
+    Priority(u8),
+    Hello(u16),
+    Dead(u32),
+    Network(rios_config::OspfNetworkType),
+}
 /// Routing configuration context reserved for later protocol implementation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RoutingProtocol {
@@ -193,6 +202,15 @@ pub enum Command {
     },
     EnterRouterOspf(u16),
     AddOspfNetwork(OspfNetworkConfig),
+    SetOspfRouterId(Option<Ipv4Addr>),
+    SetOspfPassive {
+        interface: String,
+        passive: bool,
+    },
+    SetOspfPort(OspfPortOption),
+    ShowIpOspf,
+    ShowIpProtocols,
+    ShowIpOspfNeighborDetail,
     Shutdown,
     NoShutdown,
     Switchport,
