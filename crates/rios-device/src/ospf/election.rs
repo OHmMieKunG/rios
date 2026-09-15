@@ -1,37 +1,5 @@
 //! RFC 2328 broadcast DR/BDR election and adjacency selection.
 use super::*;
-#[derive(Clone, Copy)]
-struct Candidate {
-    priority: u8,
-    id: Ipv4Addr,
-    address: Ipv4Addr,
-    dr: Ipv4Addr,
-    bdr: Ipv4Addr,
-}
-fn elect(candidates: &[Candidate]) -> (Ipv4Addr, Ipv4Addr) {
-    let rank = |c: &&Candidate| (c.priority, c.id);
-    let eligible: Vec<_> = candidates.iter().filter(|c| c.priority > 0).collect();
-    let bdr = eligible
-        .iter()
-        .copied()
-        .filter(|c| c.dr != c.address && c.bdr == c.address)
-        .max_by_key(rank)
-        .or_else(|| {
-            eligible
-                .iter()
-                .copied()
-                .filter(|c| c.dr != c.address)
-                .max_by_key(rank)
-        })
-        .map_or(Ipv4Addr::UNSPECIFIED, |c| c.address);
-    let dr = eligible
-        .iter()
-        .copied()
-        .filter(|c| c.dr == c.address)
-        .max_by_key(rank)
-        .map_or(bdr, |c| c.address);
-    (dr, bdr)
-}
 impl Device {
     pub(super) fn ospf_elect(&mut self, now: SimTime, out: &mut Vec<OspfTransmission>) {
         let Some(self_id) = self.ospf_runtime.router_id else {
@@ -46,7 +14,7 @@ impl Device {
                     .neighbors
                     .iter()
                     .filter(|((port, _), n)| *port == id && n.info.state != OspfNeighborState::Init)
-                    .map(|(_, n)| Candidate {
+                    .map(|(_, n)| OspfElectionCandidate {
                         priority: n.info.priority,
                         id: n.info.router_id,
                         address: n.info.address,
@@ -60,7 +28,7 @@ impl Device {
                 if now < runtime.wait_until && !backup_seen && runtime.dr.is_unspecified() {
                     continue;
                 }
-                let local = Candidate {
+                let local = OspfElectionCandidate {
                     priority: runtime.policy.priority,
                     id: self_id,
                     address: runtime.address.address(),
@@ -68,7 +36,7 @@ impl Device {
                     bdr: runtime.bdr,
                 };
                 candidates.push(local);
-                let (mut dr, mut bdr) = elect(&candidates);
+                let (mut dr, mut bdr) = ospf_election(&candidates);
                 if (dr == local.address) != (local.dr == local.address)
                     || (bdr == local.address) != (local.bdr == local.address)
                 {
@@ -76,7 +44,7 @@ impl Device {
                         last.dr = dr;
                         last.bdr = bdr;
                     }
-                    (dr, bdr) = elect(&candidates);
+                    (dr, bdr) = ospf_election(&candidates);
                 }
                 if let Some(runtime) = self.ospf_runtime.interfaces.get_mut(&id) {
                     if runtime.dr != dr || runtime.bdr != bdr {

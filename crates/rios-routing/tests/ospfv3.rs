@@ -232,3 +232,122 @@ fn arbitrary_bodies_with_valid_packet_checksums_are_safe() {
         let _ = OspfV3Lsa::decode(&b);
     }
 }
+
+fn router(n: u8, links: &[(u8, u32, u32, u16)]) -> OspfV3Lsa {
+    advertisement(
+        n,
+        0,
+        OspfV3LsaBody::Router {
+            flags: 0,
+            options: OSPFV3_OPTIONS,
+            links: links
+                .iter()
+                .map(|(peer, local, remote, cost)| OspfV3RouterLink {
+                    kind: OspfV3LinkType::PointToPoint,
+                    metric: *cost,
+                    interface_id: *local,
+                    neighbor_interface_id: *remote,
+                    neighbor_router: id(*peer),
+                })
+                .collect(),
+        },
+    )
+}
+#[test]
+fn spf_keeps_ipv6_prefixes_and_parallel_link_identifiers_separate() {
+    let prefix = "2001:db8:3::/64".parse().unwrap();
+    let mut lsas = vec![
+        router(1, &[(2, 1, 11, 20), (2, 2, 12, 5), (3, 3, 13, 30)]),
+        router(2, &[(1, 11, 1, 20), (1, 12, 2, 5), (3, 23, 32, 3)]),
+        router(3, &[(1, 13, 3, 30), (2, 32, 23, 3)]),
+        advertisement(
+            3,
+            0,
+            OspfV3LsaBody::IntraAreaPrefix {
+                reference: OspfV3LsaKey {
+                    kind: V3_ROUTER_LSA,
+                    link_state_id: 0,
+                    advertising_router: id(3),
+                },
+                prefixes: vec![OspfV3Prefix {
+                    prefix,
+                    options: 0,
+                    metric: 2,
+                }],
+            },
+        ),
+    ];
+    let routes = ospfv3_spf(id(1), &lsas);
+    assert_eq!(
+        (
+            routes[&prefix].metric,
+            routes[&prefix].first_hop,
+            routes[&prefix].interface_id
+        ),
+        (10, id(2), 2)
+    );
+    lsas.reverse();
+    assert_eq!(ospfv3_spf(id(1), &lsas), routes);
+    // A mismatched neighbor interface ID cannot create a shortcut.
+    let second = lsas
+        .iter_mut()
+        .find(|l| l.advertising_router == id(2))
+        .unwrap();
+    if let OspfV3LsaBody::Router { links, .. } = &mut second.body {
+        links[1].neighbor_interface_id = 999;
+    }
+    let routes = ospfv3_spf(id(1), &lsas);
+    assert_eq!(
+        (routes[&prefix].metric, routes[&prefix].interface_id),
+        (25, 1)
+    );
+    lsas.iter_mut()
+        .filter(|l| l.advertising_router == id(2))
+        .for_each(|l| l.age = LSA_MAX_AGE);
+    assert_eq!(ospfv3_spf(id(1), &lsas)[&prefix].metric, 32);
+}
+#[test]
+fn spf_resolves_transit_network_prefix_reference() {
+    let prefix = "2001:db8:100::/64".parse().unwrap();
+    let network = OspfV3LsaKey {
+        kind: V3_NETWORK_LSA,
+        link_state_id: 9,
+        advertising_router: id(2),
+    };
+    let mut a = router(1, &[(2, 1, 9, 4)]);
+    let mut b = router(2, &[(2, 9, 9, 7)]);
+    for lsa in [&mut a, &mut b] {
+        if let OspfV3LsaBody::Router { links, .. } = &mut lsa.body {
+            links[0].kind = OspfV3LinkType::Transit;
+        }
+    }
+    let lsas = vec![
+        a,
+        b,
+        advertisement(
+            2,
+            9,
+            OspfV3LsaBody::Network {
+                options: OSPFV3_OPTIONS,
+                routers: vec![id(1), id(2)],
+            },
+        ),
+        advertisement(
+            2,
+            9,
+            OspfV3LsaBody::IntraAreaPrefix {
+                reference: network,
+                prefixes: vec![OspfV3Prefix {
+                    prefix,
+                    options: 0,
+                    metric: 0,
+                }],
+            },
+        ),
+    ];
+    let route = ospfv3_spf(id(1), &lsas)[&prefix];
+    assert_eq!(
+        (route.metric, route.first_hop, route.interface_id),
+        (4, id(1), 1)
+    );
+}

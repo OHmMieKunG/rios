@@ -67,3 +67,5 @@ fn u32_at(b: &[u8], i: usize) -> u32 {
 fn rid(b: &[u8], i: usize) -> Ipv4Addr {
     Ipv4Addr::from(u32_at(b, i))
 }
+mod spf;
+pub use spf::*;
