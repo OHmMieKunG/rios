@@ -25,6 +25,13 @@ impl Lab {
                     transaction_id: self.next_dhcp_xid,
                     client_mac,
                     your_ip: Ipv4Addr::UNSPECIFIED,
+                    client_ip: Ipv4Addr::UNSPECIFIED,
+                    relay_ip: Ipv4Addr::UNSPECIFIED,
+                    hops: 0,
+                    dns_servers: Vec::new(),
+                    domain_name: None,
+                    renewal_seconds: None,
+                    rebinding_seconds: None,
                     requested_ip: None,
                     server_id: None,
                     subnet_mask: None,
@@ -86,6 +93,13 @@ impl Lab {
                         transaction_id: message.transaction_id,
                         client_mac: message.client_mac,
                         your_ip: Ipv4Addr::UNSPECIFIED,
+                        client_ip: Ipv4Addr::UNSPECIFIED,
+                        relay_ip: Ipv4Addr::UNSPECIFIED,
+                        hops: 0,
+                        dns_servers: Vec::new(),
+                        domain_name: None,
+                        renewal_seconds: None,
+                        rebinding_seconds: None,
                         requested_ip: Some(message.your_ip),
                         server_id: message.server_id,
                         subnet_mask: None,
@@ -116,6 +130,7 @@ impl Lab {
                     dhcp_response(DhcpMessageType::Ack, message, offer),
                 )?;
             }
+            DhcpMessageType::Decline | DhcpMessageType::Nak => {}
             DhcpMessageType::Ack => {
                 if self.dhcp_transactions.get(&interface) != Some(&message.transaction_id)
                     || self.device(interface.device)?.interfaces()[&interface.interface].mac_address
@@ -179,7 +194,9 @@ impl Lab {
         let datagram = UdpDatagram {
             source_port,
             destination_port,
-            payload: message.encode(),
+            payload: message
+                .encode()
+                .map_err(|error| LabError::Protocol(error.to_string()))?,
         };
         let packet = Ipv4Packet {
             source: source_ip,
@@ -203,6 +220,13 @@ fn dhcp_response(
         transaction_id: request.transaction_id,
         client_mac: request.client_mac,
         your_ip: offer.address,
+        client_ip: Ipv4Addr::UNSPECIFIED,
+        relay_ip: request.relay_ip,
+        hops: request.hops,
+        dns_servers: Vec::new(),
+        domain_name: None,
+        renewal_seconds: None,
+        rebinding_seconds: None,
         requested_ip: None,
         server_id: Some(offer.server_id),
         subnet_mask: Some(
