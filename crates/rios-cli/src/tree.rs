@@ -7,6 +7,8 @@ pub(crate) enum Action {
     RouterBgp,
     NoRouterBgp,
     BgpRouterId,
+    BgpClusterId,
+    NoBgpClusterId,
     NoBgpRouterId,
     BgpNetwork,
     NoBgpNetwork,

@@ -179,7 +179,8 @@ pub fn execute_at(
         }
         Command::EnterVlan(_) => matches!(mode, GlobalConfiguration | VlanConfiguration(_)),
         Command::BgpProcess { .. } => mode == GlobalConfiguration,
-        Command::SetBgpRouterId(_)
+        Command::SetBgpClusterId(_)
+        | Command::SetBgpRouterId(_)
         | Command::SetBgpNeighbor { .. }
         | Command::SetBgpNetwork { .. } => mode == RouterConfiguration(RoutingProtocol::Bgp),
         Command::EnterRouterOspfv3(_)
@@ -435,6 +436,7 @@ pub fn execute_at(
                 return Err(DeviceError::InvalidBgpConfig.into());
             }
         }
+        Command::SetBgpClusterId(id) => device.set_bgp_cluster_id(id)?,
         Command::SetBgpRouterId(id) => device.set_bgp_router_id(id)?,
         Command::SetBgpNetwork { prefix, present } => device.set_bgp_network(prefix, present)?,
         Command::SetBgpNeighbor { address, option } => {
@@ -453,11 +455,15 @@ pub fn execute_at(
                             remote_as,
                             update_source: None,
                             next_hop_self: false,
+                            route_reflector_client: false,
                         })
                         .remote_as = remote_as;
                 }
                 let mut config = config.ok_or(DeviceError::InvalidBgpConfig)?;
                 match option {
+                    BgpNeighborOption::RouteReflectorClient(value) => {
+                        config.route_reflector_client = value
+                    }
                     BgpNeighborOption::NextHopSelf(value) => config.next_hop_self = value,
                     BgpNeighborOption::UpdateSource(name) => {
                         config.update_source = name

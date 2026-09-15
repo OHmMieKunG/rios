@@ -40,16 +40,24 @@ pub(super) fn options(action: Action, args: &[Token<'_>]) -> Result<ospf::Option
                 present: matches!(action, RouterBgp),
             }
         }
-        BgpRouterId => {
+        BgpRouterId | BgpClusterId => {
             let Some(token) = args.first() else {
                 return pending(vec!["<router-id>"]);
             };
             exact(1)?;
-            Command::SetBgpRouterId(Some(ip(token)?))
+            if matches!(action, BgpRouterId) {
+                Command::SetBgpRouterId(Some(ip(token)?))
+            } else {
+                Command::SetBgpClusterId(Some(ip(token)?))
+            }
         }
-        NoBgpRouterId => {
+        NoBgpRouterId | NoBgpClusterId => {
             exact(0)?;
-            Command::SetBgpRouterId(None)
+            if matches!(action, NoBgpRouterId) {
+                Command::SetBgpRouterId(None)
+            } else {
+                Command::SetBgpClusterId(None)
+            }
         }
         BgpNetwork | NoBgpNetwork => {
             let Some(token) = args.first() else {
@@ -78,7 +86,12 @@ pub(super) fn options(action: Action, args: &[Token<'_>]) -> Result<ospf::Option
             };
             let address = ip(token)?;
             let present = matches!(action, BgpNeighbor);
-            let choices = vec!["remote-as", "update-source", "next-hop-self"];
+            let choices = vec![
+                "remote-as",
+                "update-source",
+                "next-hop-self",
+                "route-reflector-client",
+            ];
             let Some(token) = args.get(1) else {
                 if present {
                     return pending(choices);
@@ -95,6 +108,10 @@ pub(super) fn options(action: Action, args: &[Token<'_>]) -> Result<ospf::Option
             };
             let word = unique_choice(token, &choices)?;
             let option = match word {
+                "route-reflector-client" => {
+                    exact(2)?;
+                    BgpNeighborOption::RouteReflectorClient(present)
+                }
                 "next-hop-self" => {
                     exact(2)?;
                     BgpNeighborOption::NextHopSelf(present)

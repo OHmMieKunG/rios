@@ -280,7 +280,9 @@ impl Device {
             }
             let looped = attrs.contains_as(config.local_as)
                 || attrs.originator_id == Some(router_id)
-                || attrs.cluster_list.contains(&router_id);
+                || attrs
+                    .cluster_list
+                    .contains(&config.cluster_id.unwrap_or(router_id));
             for prefix in update.announced {
                 if looped {
                     peer.received.remove(&prefix);

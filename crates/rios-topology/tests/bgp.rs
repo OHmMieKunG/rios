@@ -29,6 +29,7 @@ fn peer(lab: &mut Lab, name: &str, asn: u32, remote: &str, remote_as: u32) {
                 remote_as,
                 update_source: None,
                 next_hop_self: false,
+                route_reflector_client: false,
             }),
         )
         .unwrap();
@@ -353,4 +354,93 @@ fn ibgp_split_horizon_prevents_internal_route_readvertisement() {
     assert_eq!(r1.bgp_neighbors()[0].state, BgpState::Established);
     assert!(r2.bgp_paths().contains_key(&prefix));
     assert!(!r1.bgp_paths().contains_key(&prefix));
+}
+
+#[test]
+fn route_reflector_exchanges_client_routes_and_rejects_cluster_loops() {
+    let mut lab = chain();
+    for (name, remote) in [
+        ("R1", "10.0.12.2"),
+        ("R2", "10.0.12.1"),
+        ("R2", "10.0.23.3"),
+        ("R3", "10.0.23.2"),
+    ] {
+        peer(&mut lab, name, 65000, remote, 65000);
+    }
+    route(&mut lab, "R1", "10.0.23.0", 24, "10.0.12.2");
+    route(&mut lab, "R3", "10.0.12.0", 24, "10.0.23.2");
+    let r1 = lab.device_id("R1").unwrap();
+    let rr = lab.device_id("R2").unwrap();
+    let r3 = lab.device_id("R3").unwrap();
+    let p1 = Ipv4Network::new("192.0.2.1".parse().unwrap(), 32).unwrap();
+    let p3 = Ipv4Network::new("192.0.2.3".parse().unwrap(), 32).unwrap();
+    lab.with_device_mut(r1, |d| d.set_bgp_network(p1, true).unwrap())
+        .unwrap();
+    lab.with_device_mut(r3, |d| d.set_bgp_network(p3, true).unwrap())
+        .unwrap();
+    let cluster = "9.9.9.9".parse().unwrap();
+    lab.with_device_mut(rr, |d| {
+        d.set_bgp_cluster_id(Some(cluster)).unwrap();
+        for (ip, client) in [("10.0.12.1", false), ("10.0.23.3", true)] {
+            let address = ip.parse().unwrap();
+            let mut p = d.running_config().bgp.as_ref().unwrap().neighbors[&address].clone();
+            p.route_reflector_client = client;
+            p.next_hop_self = true;
+            d.set_bgp_neighbor(address, Some(p)).unwrap();
+        }
+    })
+    .unwrap();
+    let events = lab.run_until(SimTime::from_millis(5000)).unwrap();
+    assert!(events.iter().any(|e| {
+        let EventOutcome::FrameReceived { frame, .. } = e else {
+            return false;
+        };
+        let Ok(ip) = Ipv4Packet::decode(&frame.payload) else {
+            return false;
+        };
+        let Ok(tcp) = TcpSegment::decode(ip.source, ip.destination, &ip.payload) else {
+            return false;
+        };
+        let Ok(BgpMessage::Update(update)) = BgpMessage::decode(&tcp.payload, true) else {
+            return false;
+        };
+        update
+            .attributes
+            .is_some_and(|a| a.cluster_list == vec![cluster] && a.originator_id.is_some())
+    }));
+    for (id, prefix, origin, hop) in [
+        (r1, p3, "192.0.2.3", "10.0.23.3"),
+        (r3, p1, "192.0.2.1", "10.0.12.1"),
+    ] {
+        let a = &lab.device(id).unwrap().bgp_paths()[&prefix].attributes;
+        assert_eq!(a.originator_id.unwrap().to_string(), origin);
+        assert_eq!(a.cluster_list, vec![cluster]);
+        assert_eq!(
+            a.next_hop.to_string(),
+            hop,
+            "reflection must preserve next hop despite next-hop-self"
+        );
+        assert!(a.as_path.is_empty());
+    }
+    assert_eq!(lab.ping(r1, p3.address()).unwrap().received, 5);
+    lab.with_device_mut(r1, |d| d.set_bgp_cluster_id(Some(cluster)).unwrap())
+        .unwrap();
+    lab.run_until(SimTime::from_millis(8000)).unwrap();
+    assert!(!lab.device(r1).unwrap().bgp_paths().contains_key(&p3));
+    assert_eq!(
+        lab.device(r1).unwrap().bgp_neighbors()[0].state,
+        BgpState::Established
+    );
+    lab.with_device_mut(rr, |d| {
+        let address = "10.0.23.3".parse().unwrap();
+        let mut p = d.running_config().bgp.as_ref().unwrap().neighbors[&address].clone();
+        p.remote_as = 65003;
+        assert!(d.set_bgp_neighbor(address, Some(p.clone())).is_err());
+        p.remote_as = 65000;
+        p.route_reflector_client = false;
+        d.set_bgp_neighbor(address, Some(p)).unwrap();
+    })
+    .unwrap();
+    lab.run_until(SimTime::from_millis(10_000)).unwrap();
+    assert!(!lab.device(r3).unwrap().bgp_paths().contains_key(&p1));
 }

@@ -38,7 +38,11 @@ impl Device {
                 continue;
             };
             for (prefix, attributes) in &peer.received {
-                if self.owns_any_ipv4(attributes.next_hop)
+                if attributes.originator_id == Some(router_id)
+                    || attributes
+                        .cluster_list
+                        .contains(&config.cluster_id.unwrap_or(router_id))
+                    || self.owns_any_ipv4(attributes.next_hop)
                     || self.resolve_non_bgp_route(attributes.next_hop).is_none()
                 {
                     continue;
@@ -81,7 +85,7 @@ impl Device {
             })
             .collect();
     }
-    pub(super) fn bgp_advertise(&mut self, config: &BgpConfig, _router_id: Ipv4Addr, now: SimTime) {
+    pub(super) fn bgp_advertise(&mut self, config: &BgpConfig, router_id: Ipv4Addr, now: SimTime) {
         for (address, peer) in &mut self.bgp.peers {
             let Some(socket) = peer.selected else {
                 continue;
@@ -96,12 +100,27 @@ impl Device {
             let external = peer.config.remote_as != config.local_as;
             let mut desired = BTreeMap::new();
             for (prefix, path) in &self.bgp.best {
-                if path.learned_from == Some(*address)
-                    || (!external && path.learned_from.is_some() && !path.external)
-                {
+                if path.learned_from == Some(*address) {
+                    continue;
+                }
+                let reflecting = !external && path.learned_from.is_some() && !path.external;
+                let source_client = path
+                    .learned_from
+                    .and_then(|from| config.neighbors.get(&from))
+                    .is_some_and(|p| p.route_reflector_client);
+                if reflecting && !source_client && !peer.config.route_reflector_client {
                     continue;
                 }
                 let mut attributes = path.attributes.clone();
+                if reflecting {
+                    if attributes.originator_id == stream.fsm.peer_router_id {
+                        continue;
+                    }
+                    attributes.originator_id.get_or_insert(path.peer_router_id);
+                    attributes
+                        .cluster_list
+                        .insert(0, config.cluster_id.unwrap_or(router_id));
+                }
                 if external {
                     if attributes.contains_as(peer.config.remote_as) {
                         continue;
@@ -118,7 +137,10 @@ impl Device {
                 } else {
                     attributes.local_preference = Some(attributes.local_preference.unwrap_or(100));
                 }
-                if external || peer.config.next_hop_self || path.learned_from.is_none() {
+                if external
+                    || (peer.config.next_hop_self && !reflecting)
+                    || path.learned_from.is_none()
+                {
                     attributes.next_hop = socket.local_address;
                 }
                 for unknown in &mut attributes.unknown_transitive {

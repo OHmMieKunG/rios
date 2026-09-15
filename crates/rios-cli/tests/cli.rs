@@ -1241,7 +1241,7 @@ fn bgp_configuration_help_abbreviation_no_do_and_replay() {
     for (input, expected) in [
         ("neighbor ?", "<neighbor-address>"),
         ("neighbor 10.0.0.2 ?", "remote-as"),
-        ("neighbor 10.0.0.2 r ?", "<1-4294967294>"),
+        ("neighbor 10.0.0.2 rem ?", "<1-4294967294>"),
         ("network 192.0.2.1 ?", "mask"),
         ("network 192.0.2.1 m ?", "<netmask>"),
     ] {
@@ -1271,4 +1271,33 @@ fn bgp_configuration_help_abbreviation_no_do_and_replay() {
     for input in ["router bgp 0", "router bgp 4294967295"] {
         assert!(parse(input, CliMode::GlobalConfiguration).is_err());
     }
+}
+
+#[test]
+fn bgp_route_reflector_cli_validation_help_and_roundtrip() {
+    let mut router = Device::standalone();
+    let mut session = CliSession {
+        mode: CliMode::GlobalConfiguration,
+    };
+    for input in [
+        "router bgp 65001",
+        "bgp cluster-id 9.9.9.9",
+        "neighbor 10.0.0.2 remote-as 65001",
+        "neighbor 10.0.0.2 route-reflector-client",
+    ] {
+        run(&mut router, &mut session, input).unwrap();
+    }
+    let mut restored = Device::standalone();
+    load_configuration(&mut restored, &router.running_config().render()).unwrap();
+    assert_eq!(router.running_config(), restored.running_config());
+    assert!(matches!(
+        parse("neighbor 10.0.0.2 r", session.mode),
+        Err(ParseError::Ambiguous(_))
+    ));
+    for input in ["no neighbor 10.0.0.2 route", "no bgp cl"] {
+        run(&mut router, &mut session, input).unwrap();
+    }
+    let config = router.running_config().bgp.as_ref().unwrap();
+    assert!(config.cluster_id.is_none());
+    assert!(!config.neighbors[&"10.0.0.2".parse().unwrap()].route_reflector_client);
 }

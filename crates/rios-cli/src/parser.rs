@@ -170,6 +170,8 @@ fn parse_input(
         action,
         Action::RouterBgp
             | Action::NoRouterBgp
+            | Action::BgpClusterId
+            | Action::NoBgpClusterId
             | Action::BgpRouterId
             | Action::NoBgpRouterId
             | Action::BgpNetwork
@@ -274,8 +276,8 @@ fn parse_input(
     };
     use Action::*;
     let command = match action {
-        RouterBgp | NoRouterBgp | BgpRouterId | NoBgpRouterId | BgpNetwork | NoBgpNetwork
-        | BgpNeighbor | NoBgpNeighbor => bgp::options(action, args)?
+        BgpClusterId | NoBgpClusterId | RouterBgp | NoRouterBgp | BgpRouterId | NoBgpRouterId
+        | BgpNetwork | NoBgpNetwork | BgpNeighbor | NoBgpNeighbor => bgp::options(action, args)?
             .command
             .ok_or(ParseError::Incomplete)?,
         BgpTable => Command::ShowIpBgp,
@@ -997,6 +999,8 @@ pub fn suggestions(
             action,
             Action::RouterBgp
                 | Action::NoRouterBgp
+                | Action::BgpClusterId
+                | Action::NoBgpClusterId
                 | Action::BgpRouterId
                 | Action::NoBgpRouterId
                 | Action::BgpNetwork

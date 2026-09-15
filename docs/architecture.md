@@ -551,9 +551,8 @@ or 200. `network ... mask ...` requires an exact non-BGP route before originatin
 
 Limits: 256 peers/device, two collision candidates/peer, 4096 received
 prefixes/peer, 4096 selected prefixes/device, 8192 framing bytes/stream and 32
-queued messages/stream. Backpressure defers export while TCP is busy. This initial
-slice excludes route reflection, policy maps, prefix lists and default-originate;
-those are the remaining BGP roadmap work. IPv6 AFI/SAFI, graceful restart,
+queued messages/stream. Backpressure defers export while TCP is busy. Policy maps,
+prefix lists and default-originate remain the next BGP roadmap work. IPv6 AFI/SAFI, graceful restart,
 ADD-PATH, extended messages and legacy AS4_PATH reconstruction are not supported.
 RIOS peers advertise four-octet ASN capability. Codecs follow public
 [RFC 4271](https://datatracker.ietf.org/doc/html/rfc4271) and
@@ -564,3 +563,12 @@ Exercise the terminal path with:
 ```sh
 cargo run -- lab examples/two-routers.yaml < examples/bgp-session.txt
 ```
+
+Route reflection follows [RFC 4456](https://www.rfc-editor.org/rfc/rfc4456.html).
+`neighbor ... route-reflector-client` permits client-to-client and
+client/non-client propagation; non-client-to-non-client propagation remains
+suppressed. Reflected UPDATEs carry ORIGINATOR_ID and a prepended CLUSTER_LIST.
+`bgp cluster-id` permits a shared cluster identifier; the router ID is the
+default. Originator and cluster loops are rejected. Reflection preserves
+NEXT_HOP, including when ordinary `next-hop-self` is configured. Client policy
+edits recalculate export and issue real withdrawals without resetting TCP.

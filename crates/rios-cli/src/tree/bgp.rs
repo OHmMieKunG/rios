@@ -53,6 +53,21 @@ pub(super) fn add(root: &mut Node, mode: CliMode) {
                 ],
                 NoBgpRouterId,
             );
+            root.add(
+                &[
+                    ("bgp", ""),
+                    ("cluster-id", "Route reflector cluster identifier"),
+                ],
+                BgpClusterId,
+            );
+            root.add(
+                &[
+                    ("no", ""),
+                    ("bgp", ""),
+                    ("cluster-id", "Use router ID as cluster identifier"),
+                ],
+                NoBgpClusterId,
+            );
             root.add(&[("neighbor", "Configure a BGP peer")], BgpNeighbor);
             root.add(
                 &[("no", ""), ("neighbor", "Remove a BGP peer or option")],

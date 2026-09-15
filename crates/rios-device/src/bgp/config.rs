@@ -1,6 +1,19 @@
 //! BGP input validation. Configuration edits are reconciled by the next simulator event.
 use super::*;
 impl Device {
+    /// Configure a shared route-reflector cluster identifier; default is the local router ID.
+    pub fn set_bgp_cluster_id(&mut self, id: Option<Ipv4Addr>) -> Result<(), DeviceError> {
+        if id.is_some_and(|id| id.is_unspecified() || id.is_multicast() || id.is_broadcast()) {
+            return Err(DeviceError::InvalidBgpConfig);
+        }
+        self.running_config
+            .bgp
+            .as_mut()
+            .ok_or(DeviceError::InvalidBgpConfig)?
+            .cluster_id = id;
+        Ok(())
+    }
+
     /// Enable, replace or remove the single IPv4 BGP process.
     pub fn set_bgp_process(&mut self, asn: Option<u32>) -> Result<(), DeviceError> {
         if !self.supports_routing() || asn.is_some_and(|n| n == 0 || n == u32::MAX) {
@@ -60,6 +73,9 @@ impl Device {
             .as_mut()
             .ok_or(DeviceError::InvalidBgpConfig)?;
         if let Some(peer) = peer {
+            if peer.route_reflector_client && peer.remote_as != config.local_as {
+                return Err(DeviceError::InvalidBgpConfig);
+            }
             if config.neighbors.len() >= PEER_LIMIT && !config.neighbors.contains_key(&address) {
                 return Err(DeviceError::InvalidBgpConfig);
             }

@@ -39,6 +39,7 @@ pub enum BgpNeighborOption {
     RemoteAs(u32),
     UpdateSource(Option<String>),
     NextHopSelf(bool),
+    RouteReflectorClient(bool),
 }
 /// Routing configuration context reserved for later protocol implementation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,6 +142,7 @@ pub enum Command {
         present: bool,
     },
     SetBgpRouterId(Option<Ipv4Addr>),
+    SetBgpClusterId(Option<Ipv4Addr>),
     SetBgpNetwork {
         prefix: Ipv4Network,
         present: bool,
