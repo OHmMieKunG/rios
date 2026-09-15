@@ -178,6 +178,13 @@ fn decode_ping_signal(
     sequence: u16,
     local_ip: Ipv4Addr,
 ) -> Option<PingSignal> {
+    let untagged;
+    let frame = if frame.ethertype == EtherType::Dot1Q {
+        untagged = frame.untagged().ok()?.1;
+        &untagged
+    } else {
+        frame
+    };
     if frame.ethertype != EtherType::Ipv4 {
         return None;
     }

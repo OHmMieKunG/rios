@@ -28,6 +28,7 @@ pub enum CliMode {
     PrivilegedExec,
     GlobalConfiguration,
     InterfaceConfiguration(InterfaceId),
+    SubinterfaceConfiguration(InterfaceId),
     InterfaceRangeConfiguration(InterfaceId, InterfaceId),
     VlanConfiguration(VlanId),
     RouterConfiguration(RoutingProtocol),
@@ -46,6 +47,7 @@ impl CliSession {
             CliMode::PrivilegedExec => "#",
             CliMode::GlobalConfiguration => "(config)#",
             CliMode::InterfaceConfiguration(_) => "(config-if)#",
+            CliMode::SubinterfaceConfiguration(_) => "(config-subif)#",
             CliMode::InterfaceRangeConfiguration(_, _) => "(config-if-range)#",
             CliMode::VlanConfiguration(_) => "(config-vlan)#",
             CliMode::RouterConfiguration(_) => "(config-router)#",
@@ -59,6 +61,7 @@ impl CliSession {
             self.mode,
             CliMode::GlobalConfiguration
                 | CliMode::InterfaceConfiguration(_)
+                | CliMode::SubinterfaceConfiguration(_)
                 | CliMode::InterfaceRangeConfiguration(_, _)
                 | CliMode::VlanConfiguration(_)
                 | CliMode::RouterConfiguration(_)
@@ -124,6 +127,11 @@ pub enum Command {
     SetSwitchportMode(SwitchportMode),
     SetAccessVlan(VlanId),
     SetTrunkAllowedVlans(BTreeSet<VlanId>),
+    SetNativeVlan(VlanId),
+    SetDot1q {
+        vlan: VlanId,
+        native: bool,
+    },
     EnterRouterOspf(u16),
     AddOspfNetwork(OspfNetworkConfig),
     Shutdown,

@@ -30,6 +30,8 @@ pub(crate) enum Action {
     SwitchportTrunkMode,
     SwitchportAccessVlan,
     SwitchportTrunkAllowed,
+    NativeVlan,
+    Dot1q,
     RouterOspf,
     OspfNetwork,
     OspfNeighbor,
@@ -83,7 +85,11 @@ impl Action {
             Self::DhcpNetwork => &["<network> <mask>"],
             Self::DhcpDefaultRouter => &["<address>"],
             Self::NatOverload => &["list <1-99> interface <interface> overload"],
-            Self::Vlan | Self::NoVlan | Self::SwitchportAccessVlan => &["<vlan-id>"],
+            Self::Vlan
+            | Self::NoVlan
+            | Self::SwitchportAccessVlan
+            | Self::NativeVlan
+            | Self::Dot1q => &["<vlan-id>"],
             Self::Do => &["<EXEC-command>"],
             Self::SwitchportTrunkAllowed => &["<vlan-list>"],
             Self::VlanName => &["<name>"],
@@ -266,6 +272,7 @@ pub(crate) fn tree(mode: CliMode) -> Node {
         }
         CliMode::GlobalConfiguration
         | CliMode::InterfaceConfiguration(_)
+        | CliMode::SubinterfaceConfiguration(_)
         | CliMode::InterfaceRangeConfiguration(_, _)
         | CliMode::VlanConfiguration(_)
         | CliMode::RouterConfiguration(_)
@@ -359,9 +366,20 @@ pub(crate) fn tree(mode: CliMode) -> Node {
             }
             if matches!(
                 mode,
-                CliMode::InterfaceConfiguration(_) | CliMode::InterfaceRangeConfiguration(_, _)
+                CliMode::InterfaceConfiguration(_)
+                    | CliMode::SubinterfaceConfiguration(_)
+                    | CliMode::InterfaceRangeConfiguration(_, _)
             ) {
                 root.add(&[("description", "Set interface description")], Description);
+                root.add(
+                    &[
+                        ("switchport", "Layer 2 port configuration"),
+                        ("trunk", "Trunk parameters"),
+                        ("native", "Native VLAN"),
+                        ("vlan", "Untagged VLAN"),
+                    ],
+                    NativeVlan,
+                );
                 root.add(
                     &[
                         ("no", "Negate a command"),
@@ -415,7 +433,17 @@ pub(crate) fn tree(mode: CliMode) -> Node {
                     SwitchportTrunkAllowed,
                 );
             }
-            if matches!(mode, CliMode::InterfaceConfiguration(_)) {
+            if matches!(
+                mode,
+                CliMode::InterfaceConfiguration(_) | CliMode::SubinterfaceConfiguration(_)
+            ) {
+                root.add(
+                    &[
+                        ("encapsulation", "Set subinterface encapsulation"),
+                        ("dot1q", "IEEE 802.1Q VLAN"),
+                    ],
+                    Dot1q,
+                );
                 root.add(
                     &[
                         ("ip", "IP configuration"),

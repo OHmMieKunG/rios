@@ -90,6 +90,36 @@ impl Lab {
         source: InterfaceRef,
         frame: EthernetFrame,
     ) -> Result<(), LabError> {
+        if self
+            .device(source.device)?
+            .running_config()
+            .interfaces
+            .get(&source.interface)
+            .is_some_and(|config| config.parent.is_some())
+        {
+            let length = frame.len();
+            let Some((parent, wire)) = self
+                .device(source.device)?
+                .subinterface_egress(source.interface, frame)
+            else {
+                self.devices
+                    .get_mut(&source.device)
+                    .ok_or(DropReason::NoLink)?
+                    .record_drop_reason(source.interface, DropReason::InterfaceDown)?;
+                return Ok(());
+            };
+            self.devices
+                .get_mut(&source.device)
+                .ok_or(DropReason::NoLink)?
+                .record_frame(source.interface, length, false)?;
+            return self.transmit_protocol(
+                InterfaceRef {
+                    device: source.device,
+                    interface: parent,
+                },
+                wire,
+            );
+        }
         let Some(vlan) = self.device(source.device)?.svi_vlan(source.interface) else {
             return self.transmit_protocol(source, frame);
         };
@@ -207,7 +237,22 @@ impl Lab {
                         {
                             self.handle_switch_frame(interface, &frame)?;
                         } else {
-                            self.handle_protocol_frame(interface, &frame)?;
+                            if let Some((logical, inner)) = self
+                                .device(interface.device)?
+                                .routed_ingress(interface.interface, &frame)
+                            {
+                                let logical = InterfaceRef {
+                                    device: interface.device,
+                                    interface: logical,
+                                };
+                                if logical != interface {
+                                    self.devices
+                                        .get_mut(&logical.device)
+                                        .ok_or(DropReason::NoLink)?
+                                        .record_frame(logical.interface, inner.len(), true)?;
+                                }
+                                self.handle_protocol_frame(logical, &inner)?;
+                            }
                         }
                         if is_stp_frame(&frame) {
                             return Ok(None);

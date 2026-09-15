@@ -30,7 +30,7 @@ fn edit_interfaces(
     mut edit: impl FnMut(&mut Device, rios_simulator::InterfaceId) -> Result<(), DeviceError>,
 ) -> Result<(), DeviceError> {
     let interfaces = match mode {
-        CliMode::InterfaceConfiguration(id) => vec![id],
+        CliMode::InterfaceConfiguration(id) | CliMode::SubinterfaceConfiguration(id) => vec![id],
         CliMode::InterfaceRangeConfiguration(first, last) => device.interface_range(first, last)?,
         _ => return Err(DeviceError::MissingInterface),
     };
@@ -93,6 +93,7 @@ pub fn execute_at(
         mode,
         GlobalConfiguration
             | InterfaceConfiguration(_)
+            | SubinterfaceConfiguration(_)
             | InterfaceRangeConfiguration(_, _)
             | VlanConfiguration(_)
             | RouterConfiguration(_)
@@ -131,18 +132,28 @@ pub fn execute_at(
         | Command::Switchport
         | Command::NoSwitchport
         | Command::SetSwitchportMode(_)
+        | Command::SetNativeVlan(_)
         | Command::SetAccessVlan(_)
         | Command::SetTrunkAllowedVlans(_) => matches!(
             mode,
-            InterfaceConfiguration(_) | InterfaceRangeConfiguration(_, _)
+            InterfaceConfiguration(_)
+                | SubinterfaceConfiguration(_)
+                | InterfaceRangeConfiguration(_, _)
         ),
         Command::SetIpv4Address(_)
         | Command::SetIpv4Dhcp
+        | Command::SetDot1q { .. }
         | Command::NoIpv4Address
         | Command::SetNatRole(_) => {
-            matches!(mode, InterfaceConfiguration(_))
+            matches!(
+                mode,
+                InterfaceConfiguration(_) | SubinterfaceConfiguration(_)
+            )
         }
-        Command::SetAccessGroup { .. } => matches!(mode, InterfaceConfiguration(_)),
+        Command::SetAccessGroup { .. } => matches!(
+            mode,
+            InterfaceConfiguration(_) | SubinterfaceConfiguration(_)
+        ),
         Command::ShowInterfaces
         | Command::ShowIpInterfaceBrief
         | Command::ShowInterfacesStatus
@@ -177,7 +188,13 @@ pub fn execute_at(
         Command::Hostname(name) => device.set_hostname(&name)?,
         Command::EnterInterface(name) => {
             let id = device.ensure_interface(&name)?;
-            session.mode = InterfaceConfiguration(id);
+            session.mode = if device.interfaces()[&id].kind
+                == rios_device::InterfaceKind::EthernetSubinterface
+            {
+                SubinterfaceConfiguration(id)
+            } else {
+                InterfaceConfiguration(id)
+            };
         }
         Command::EnterInterfaceRange { first, last } => {
             let first = device
@@ -196,17 +213,17 @@ pub fn execute_at(
             edit_interfaces(device, mode, Device::clear_description)?;
         }
         Command::SetIpv4Address(ip) => {
-            if let InterfaceConfiguration(id) = mode {
+            if let InterfaceConfiguration(id) | SubinterfaceConfiguration(id) = mode {
                 device.set_ipv4(id, ip)?;
             }
         }
         Command::SetIpv4Dhcp => {
-            if let InterfaceConfiguration(id) = mode {
+            if let InterfaceConfiguration(id) | SubinterfaceConfiguration(id) = mode {
                 device.set_dhcp_client(id)?;
             }
         }
         Command::NoIpv4Address => {
-            if let InterfaceConfiguration(id) = mode {
+            if let InterfaceConfiguration(id) | SubinterfaceConfiguration(id) = mode {
                 device.clear_ipv4(id)?;
             }
         }
@@ -222,7 +239,7 @@ pub fn execute_at(
             device.add_access_list_entry(id, entry)?;
         }
         Command::SetAccessGroup { id, direction } => {
-            if let InterfaceConfiguration(interface) = mode {
+            if let InterfaceConfiguration(interface) | SubinterfaceConfiguration(interface) = mode {
                 device.set_access_group(interface, id, direction)?;
             }
         }
@@ -241,7 +258,7 @@ pub fn execute_at(
             }
         }
         Command::SetNatRole(role) => {
-            if let InterfaceConfiguration(interface) = mode {
+            if let InterfaceConfiguration(interface) | SubinterfaceConfiguration(interface) = mode {
                 device.set_nat_role(interface, role)?;
             }
         }
@@ -271,6 +288,14 @@ pub fn execute_at(
             edit_interfaces(device, mode, |device, id| {
                 device.set_switchport_mode(id, switchport_mode)
             })?;
+        }
+        Command::SetDot1q { vlan, native } => {
+            if let InterfaceConfiguration(id) | SubinterfaceConfiguration(id) = mode {
+                device.set_dot1q(id, vlan, native)?;
+            }
+        }
+        Command::SetNativeVlan(vlan) => {
+            edit_interfaces(device, mode, |device, id| device.set_native_vlan(id, vlan))?;
         }
         Command::SetAccessVlan(vlan) => {
             edit_interfaces(device, mode, |device, id| device.set_access_vlan(id, vlan))?;
@@ -346,6 +371,7 @@ pub fn execute_at(
             }
             GlobalConfiguration => session.mode = PrivilegedExec,
             InterfaceConfiguration(_)
+            | SubinterfaceConfiguration(_)
             | InterfaceRangeConfiguration(_, _)
             | VlanConfiguration(_)
             | RouterConfiguration(_)
@@ -375,6 +401,7 @@ pub fn load_configuration(device: &mut Device, text: &str) -> Result<(), CliErro
             session.mode,
             CliMode::GlobalConfiguration
                 | CliMode::InterfaceConfiguration(_)
+                | CliMode::SubinterfaceConfiguration(_)
                 | CliMode::InterfaceRangeConfiguration(_, _)
                 | CliMode::VlanConfiguration(_)
                 | CliMode::RouterConfiguration(_)
@@ -388,6 +415,7 @@ pub fn load_configuration(device: &mut Device, text: &str) -> Result<(), CliErro
                 if matches!(
                     session.mode,
                     CliMode::InterfaceConfiguration(_)
+                        | CliMode::SubinterfaceConfiguration(_)
                         | CliMode::InterfaceRangeConfiguration(_, _)
                         | CliMode::VlanConfiguration(_)
                         | CliMode::RouterConfiguration(_)

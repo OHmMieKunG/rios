@@ -243,3 +243,23 @@ Capture never consumes RNG samples or schedules events. File creation refuses
 overwrite. A bounded writer buffer streams to disk, capped at 1 GiB per capture;
 write failures disable further recording, are available through `capture_error`,
 and are reported by `capture stop` without aborting simulated forwarding.
+
+## Routed subinterfaces and native VLANs
+
+Physical Ethernet parents can own routed subinterfaces such as `Gi0/0.10`.
+The interface stores a parent ID and structured dot1q encapsulation. Configure
+`encapsulation dot1q 10 [native]` before using the interface for traffic.
+Subinterfaces share the parent's MAC address, have independent IP/ACL/OSPF
+configuration and counters, and require both their own administrative state and
+the parent's operational state. A parent allows one mapping per VLAN and at
+most one native mapping. The CLI uses `(config-subif)#`; configuration replay
+uses the same validation paths.
+
+On ingress the physical port classifies the tag before ARP, IP, ACL, and routing.
+Egress uses the parent cable and its queue, with a VLAN tag unless native is set.
+Switch trunks default to native VLAN 1; `switchport trunk native vlan <id>`
+selects the untagged VLAN. Allowed VLAN lists apply to native traffic too.
+The integration fixture `examples/router-on-a-stick.yaml` covers tagged/native
+routing, subinterface ACLs, shutdown, ARP, and OSPF on the shared physical link.
+Public behavioral reference:
+[Catalyst subinterfaces](https://www.cisco.com/c/en/us/td/docs/switches/lan/catalyst9300/software/release/26-x/configuration_guide/vlan/b_26x_vlan_9300_cg/configuring_layer_3_subinterfaces.html).

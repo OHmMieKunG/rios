@@ -1,0 +1,21 @@
+devices:
+  H10:
+    type: host
+    interfaces: [GigabitEthernet0/0]
+  H20:
+    type: host
+    interfaces: [GigabitEthernet0/0]
+  R1:
+    type: router
+    interfaces: [GigabitEthernet0/0]
+  R2:
+    type: router
+    interfaces: [GigabitEthernet0/0]
+  SW1:
+    type: switch
+    interfaces: [GigabitEthernet0/1, GigabitEthernet0/2, GigabitEthernet0/3, GigabitEthernet0/4]
+links:
+  - endpoints: [H10:GigabitEthernet0/0, SW1:GigabitEthernet0/1]
+  - endpoints: [H20:GigabitEthernet0/0, SW1:GigabitEthernet0/2]
+  - endpoints: [R1:GigabitEthernet0/0, SW1:GigabitEthernet0/3]
+  - endpoints: [R2:GigabitEthernet0/0, SW1:GigabitEthernet0/4]

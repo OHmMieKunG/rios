@@ -8,6 +8,7 @@ mod nat;
 mod network;
 mod ospf;
 mod stp;
+mod subinterface;
 pub use dhcp::{DhcpBinding, DhcpLease, DhcpOffer};
 pub use ethernet::{DropReason, MacEntry};
 pub use nat::{NatProtocol, NatTranslation};
@@ -46,6 +47,7 @@ impl std::fmt::Display for DeviceType {
 pub enum InterfaceKind {
     GigabitEthernet,
     TenGigabitEthernet,
+    EthernetSubinterface,
     Serial,
     Console,
     Loopback,
@@ -59,7 +61,10 @@ impl InterfaceKind {
 
     /// Whether this interface represents installed hardware rather than a logical interface.
     pub fn is_physical(self) -> bool {
-        !matches!(self, Self::Loopback | Self::Vlan)
+        !matches!(
+            self,
+            Self::Loopback | Self::Vlan | Self::EthernetSubinterface
+        )
     }
 }
 /// Physical connector or transceiver presented by an interface.
@@ -149,6 +154,10 @@ struct StpInstance {
 /// Rejected state changes leave the device unchanged.
 #[derive(Debug, thiserror::Error)]
 pub enum DeviceError {
+    #[error("operation requires an Ethernet subinterface")]
+    NotSubinterface,
+    #[error("VLAN or native encapsulation already belongs to another subinterface")]
+    DuplicateEncapsulation,
     #[error("hostname must be 1–63 ASCII letters, digits, or hyphens, starting with a letter")]
     InvalidHostname,
     #[error("invalid or unavailable interface: {0}")]
@@ -310,7 +319,9 @@ impl Device {
             InterfaceKind::TenGigabitEthernet => InterfaceMedia::SfpPlus,
             InterfaceKind::Serial => InterfaceMedia::Serial,
             InterfaceKind::Console => InterfaceMedia::Console,
-            InterfaceKind::Loopback | InterfaceKind::Vlan => unreachable!(),
+            InterfaceKind::Loopback | InterfaceKind::Vlan | InterfaceKind::EthernetSubinterface => {
+                unreachable!()
+            }
         };
         self.insert_interface(canonical, kind, media)
     }
@@ -368,6 +379,8 @@ impl Device {
         self.running_config.interfaces.insert(
             id,
             InterfaceConfig {
+                parent: None,
+                dot1q: None,
                 name,
                 description: String::new(),
                 admin_state: if self.supports_switching() && kind.is_ethernet() {
@@ -443,6 +456,9 @@ impl Device {
         }
         if kind.is_physical() {
             return Err(DeviceError::InvalidInterface(name.into()));
+        }
+        if kind == InterfaceKind::EthernetSubinterface {
+            return self.create_subinterface(&canonical);
         }
         self.insert_interface(canonical, kind, InterfaceMedia::Virtual)
     }
@@ -646,7 +662,10 @@ impl Device {
             SwitchportMode::Access if frame.ethertype != rios_ethernet::EtherType::Dot1Q => {
                 (port.access_vlan, frame.clone())
             }
-            SwitchportMode::Trunk => frame.untagged().ok()?,
+            SwitchportMode::Trunk if frame.ethertype == rios_ethernet::EtherType::Dot1Q => {
+                frame.untagged().ok()?
+            }
+            SwitchportMode::Trunk => (port.native_vlan, frame.clone()),
             SwitchportMode::Access => return None,
         };
         let allowed = port.mode == SwitchportMode::Access
@@ -678,7 +697,11 @@ impl Device {
                     .as_ref()
                     .is_none_or(|allowed| allowed.contains(&vlan)) =>
             {
-                Some(frame.tagged(vlan))
+                Some(if port.native_vlan == vlan {
+                    frame
+                } else {
+                    frame.tagged(vlan)
+                })
             }
             _ => None,
         }
@@ -757,6 +780,16 @@ impl Device {
         self.running_config.interfaces[&id].admin_state == AdminState::Up
             && match interface.kind {
                 InterfaceKind::Loopback => true,
+                InterfaceKind::EthernetSubinterface => self
+                    .running_config
+                    .interfaces
+                    .get(&id)
+                    .is_some_and(|config| {
+                        config.dot1q.is_some()
+                            && config.parent.is_some_and(|parent| {
+                                self.protocol_up(parent) && !self.is_switchport(parent)
+                            })
+                    }),
                 InterfaceKind::GigabitEthernet | InterfaceKind::TenGigabitEthernet => {
                     interface.link_state == LinkState::Up
                 }
@@ -792,6 +825,27 @@ pub fn canonical_interface(input: &str) -> Result<(String, InterfaceKind), Devic
         return Err(DeviceError::InvalidInterface(input.into()));
     }
     let compact: String = parts.concat();
+    if let Some((parent, number)) = compact.split_once('.') {
+        if parent.is_empty()
+            || number.is_empty()
+            || !number.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            return Err(DeviceError::InvalidInterface(input.into()));
+        }
+        let number = number
+            .parse::<u32>()
+            .ok()
+            .filter(|number| *number > 0)
+            .ok_or_else(|| DeviceError::InvalidInterface(input.into()))?;
+        let (parent, kind) = canonical_interface(parent)?;
+        if !kind.is_ethernet() {
+            return Err(DeviceError::InvalidInterface(input.into()));
+        }
+        return Ok((
+            format!("{parent}.{number}"),
+            InterfaceKind::EthernetSubinterface,
+        ));
+    }
     let split = compact
         .find(|c: char| c.is_ascii_digit())
         .ok_or_else(|| DeviceError::InvalidInterface(input.into()))?;
@@ -826,6 +880,7 @@ pub fn canonical_interface(input: &str) -> Result<(String, InterfaceKind), Devic
         InterfaceKind::GigabitEthernet
         | InterfaceKind::TenGigabitEthernet
         | InterfaceKind::Serial => (2..=3).contains(&numbers.len()),
+        InterfaceKind::EthernetSubinterface => false,
         InterfaceKind::Console => numbers.len() == 1,
         InterfaceKind::Loopback => numbers.len() == 1,
         InterfaceKind::Vlan => numbers.len() == 1 && (1..=4094).contains(&numbers[0]),

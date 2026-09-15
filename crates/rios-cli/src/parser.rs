@@ -141,7 +141,9 @@ fn parse_input(
     let action = node.action.ok_or(ParseError::Incomplete)?;
     let args = &words[index..];
     let expected = match action {
-        Action::Address | Action::AccessList | Action::NatOverload | Action::Do => usize::MAX,
+        Action::Address | Action::AccessList | Action::NatOverload | Action::Do | Action::Dot1q => {
+            usize::MAX
+        }
         Action::StaticRoute | Action::NoStaticRoute => 3,
         Action::AccessGroup => 2,
         Action::DhcpNetwork => 2,
@@ -150,6 +152,7 @@ fn parse_input(
         | Action::Vlan
         | Action::NoVlan
         | Action::VlanName
+        | Action::NativeVlan
         | Action::SwitchportAccessVlan
         | Action::SwitchportTrunkAllowed
         | Action::DhcpPool
@@ -363,6 +366,19 @@ fn parse_input(
                 outside_interface,
             }
         }
+        Dot1q => {
+            if args.len() > 2 {
+                return Err(invalid(args[2].offset, "unexpected argument"));
+            }
+            if args.len() == 2 {
+                unique_choice(&args[1], &["native"])?;
+            }
+            Command::SetDot1q {
+                vlan: parse_vlan(args[0].text, args[0].offset)?,
+                native: args.len() == 2,
+            }
+        }
+        NativeVlan => Command::SetNativeVlan(parse_vlan(args[0].text, args[0].offset)?),
         Vlan => Command::EnterVlan(parse_vlan(args[0].text, args[0].offset)?),
         NoVlan => Command::RemoveVlan(parse_vlan(args[0].text, args[0].offset)?),
         VlanName => Command::NameVlan(args[0].text.into()),
@@ -670,6 +686,18 @@ pub fn suggestions(
                 return Err(invalid(args[0].offset, "expected an IPv4 address"));
             }
             let help = match action {
+                Action::Dot1q if args.is_empty() => "<vlan-id>",
+                Action::Dot1q if args.len() == 1 => {
+                    parse_configuration(input[..start].trim_end(), mode)?;
+                    if partial.is_empty() {
+                        result.push(Suggestion {
+                            word: "<cr>".into(),
+                            help: String::new(),
+                            start,
+                        });
+                    }
+                    "native"
+                }
                 Action::Address if args.is_empty() => "dhcp|<address>",
                 Action::Address if args.len() == 1 && !first_is_dhcp => "<mask>",
                 Action::StaticRoute | Action::NoStaticRoute | Action::DhcpNetwork
@@ -702,6 +730,7 @@ pub fn suggestions(
                 | Action::Vlan
                 | Action::NoVlan
                 | Action::VlanName
+                | Action::NativeVlan
                 | Action::SwitchportAccessVlan
                 | Action::SwitchportTrunkAllowed
                 | Action::RouterOspf

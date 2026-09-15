@@ -665,3 +665,41 @@ fn do_and_common_no_forms_use_contextual_commands() {
         assert!(help.contains(command));
     }
 }
+
+#[test]
+fn dot1q_subinterface_configuration_replays_and_checks_duplicates() {
+    let mut router = Device::standalone();
+    let mut session = CliSession {
+        mode: CliMode::GlobalConfiguration,
+    };
+    for line in [
+        "int gi0/0",
+        "no shut",
+        "int gi0/0.10",
+        "enc dot 10",
+        "ip address 10.0.10.1 255.255.255.0",
+    ] {
+        run(&mut router, &mut session, line).unwrap();
+    }
+    assert_eq!(session.prompt(router.hostname()), "R1(config-subif)# ");
+    let ParsedInput::Help(help) = parse("enc dot 10 ?", session.mode).unwrap() else {
+        panic!()
+    };
+    assert!(help.contains("native") && help.contains("<cr>"));
+    run(&mut router, &mut session, "int gi0/0.20").unwrap();
+    assert!(run(&mut router, &mut session, "enc dot 10").is_err());
+    run(&mut router, &mut session, "enc dot 20 nat").unwrap();
+    run(
+        &mut router,
+        &mut session,
+        "ip address 10.0.20.1 255.255.255.0",
+    )
+    .unwrap();
+    let mut restored = Device::standalone();
+    load_configuration(&mut restored, &router.running_config().render()).unwrap();
+    assert_eq!(restored, router);
+    for bad in ["int gi0/0.0", "int lo0.1", "int gi0/0.1.2"] {
+        assert!(parse(bad, session.mode).is_err());
+    }
+    assert!(run(&mut router, &mut session, "int gi0/99.10").is_err());
+}

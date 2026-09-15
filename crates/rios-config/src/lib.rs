@@ -20,6 +20,11 @@ pub enum AdminState {
 /// Authoritative configuration for one interface.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InterfaceConfig {
+    /// Physical Ethernet parent of a routed subinterface.
+    #[serde(default)]
+    pub parent: Option<InterfaceId>,
+    #[serde(default)]
+    pub dot1q: Option<Dot1qEncapsulation>,
     pub name: String,
     pub description: String,
     pub admin_state: AdminState,
@@ -38,6 +43,13 @@ pub struct InterfaceConfig {
     pub access_group_out: Option<AccessListId>,
     /// NAT classification for routed IPv4 traffic.
     pub nat_role: Option<NatRole>,
+}
+
+/// VLAN classification and native (untagged) egress on a routed subinterface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Dot1qEncapsulation {
+    pub vlan: VlanId,
+    pub native: bool,
 }
 
 /// NAT side assigned to a router interface.
@@ -110,15 +122,21 @@ pub enum SwitchportMode {
 /// VLAN policy attached to a switch interface.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SwitchportConfig {
+    #[serde(default = "default_native_vlan")]
+    pub native_vlan: VlanId,
     pub mode: SwitchportMode,
     pub access_vlan: VlanId,
     /// `None` means every configured VLAN is allowed.
     pub trunk_allowed_vlans: Option<BTreeSet<VlanId>>,
 }
+fn default_native_vlan() -> VlanId {
+    VlanId::DEFAULT
+}
 
 impl Default for SwitchportConfig {
     fn default() -> Self {
         Self {
+            native_vlan: VlanId::DEFAULT,
             mode: SwitchportMode::Access,
             access_vlan: VlanId::DEFAULT,
             trunk_allowed_vlans: None,
@@ -236,6 +254,15 @@ impl RunningConfig {
         }
         for config in self.interfaces.values() {
             writeln!(out, "interface {}", config.name).unwrap();
+            if let Some(encapsulation) = config.dot1q {
+                writeln!(
+                    out,
+                    " encapsulation dot1q {}{}",
+                    encapsulation.vlan.get(),
+                    if encapsulation.native { " native" } else { "" }
+                )
+                .unwrap();
+            }
             if !config.description.is_empty() {
                 writeln!(out, " description {}", config.description).unwrap();
             }
@@ -277,6 +304,14 @@ impl RunningConfig {
                     }
                     SwitchportMode::Trunk => {
                         out.push_str(" switchport mode trunk\n");
+                        if switchport.native_vlan != VlanId::DEFAULT {
+                            writeln!(
+                                out,
+                                " switchport trunk native vlan {}",
+                                switchport.native_vlan.get()
+                            )
+                            .unwrap();
+                        }
                         if let Some(allowed) = &switchport.trunk_allowed_vlans {
                             let list = allowed
                                 .iter()
