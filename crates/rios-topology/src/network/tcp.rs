@@ -116,7 +116,20 @@ impl Lab {
             self.transmit_tcp_packet(device, reply)?;
         }
         self.pump_bgp(device)?;
+        self.pump_services(device)?;
         self.ensure_tcp_timer(device)
+    }
+    fn pump_services(&mut self, device: DeviceId) -> Result<(), LabError> {
+        let now = self.now();
+        let packets = self
+            .devices
+            .get_mut(&device)
+            .ok_or_else(|| LabError::UnknownDevice(device.0.to_string()))?
+            .service_tcp_tick(now);
+        for packet in packets {
+            self.transmit_tcp_packet(device, packet)?;
+        }
+        Ok(())
     }
     pub(super) fn ensure_tcp_timer(&mut self, device: DeviceId) -> Result<(), LabError> {
         if self.device(device)?.tcp_connections().is_empty() || self.tcp_timers.contains(&device) {
@@ -139,6 +152,7 @@ impl Lab {
             self.transmit_tcp_packet(device, packet)?;
         }
         self.pump_bgp(device)?;
+        self.pump_services(device)?;
         self.ensure_tcp_timer(device)
     }
 }

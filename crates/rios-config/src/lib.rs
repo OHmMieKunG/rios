@@ -19,7 +19,9 @@ pub use acl::{AccessList, AclEntry, AclId, AclKind, AclProtocol, AddressMatch, P
 pub use nat::{NatPool, NatPoolRule, NatTransport, StaticNat};
 use rios_ipv4::{Ipv4InterfaceConfig, Ipv4Network};
 use rios_simulator::InterfaceId;
+mod services;
 use serde::{Deserialize, Serialize};
+pub use services::ServiceConfig;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Write,

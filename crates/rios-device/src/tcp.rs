@@ -70,14 +70,20 @@ pub struct TcpConnection {
     idle_timeout_us: Option<u64>,
     time_wait_until: Option<SimTime>,
     peer_closed: bool,
+    passive: bool,
 }
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct TcpRuntime {
-    connections: BTreeMap<TcpSocket, TcpConnection>,
-    listeners: BTreeSet<u16>,
+    pub(crate) connections: BTreeMap<TcpSocket, TcpConnection>,
+    pub(crate) listeners: BTreeSet<u16>,
     next_sequence: u32,
 }
 impl TcpConnection {
+    /// Whether this stream was accepted by a listener rather than actively opened.
+    pub fn is_passive(&self) -> bool {
+        self.passive
+    }
+
     /// Bytes currently available without changing the advertised receive window.
     pub fn received_len(&self) -> usize {
         self.received.len()
@@ -106,6 +112,7 @@ impl TcpConnection {
             idle_timeout_us: Some(IDLE_US),
             time_wait_until: None,
             peer_closed: false,
+            passive: false,
         }
     }
     fn segment(&self, socket: TcpSocket, flags: Flags, payload: Vec<u8>) -> TcpSegment {
@@ -408,6 +415,7 @@ impl Device {
         {
             let mut connection = TcpConnection::new(self.tcp_initial_sequence(), now);
             connection.state = TcpState::SynReceived;
+            connection.passive = true;
             connection.receive_next = segment.sequence.wrapping_add(1);
             connection.peer_window = segment.window;
             let reply = connection.send(socket, Flags::SYN | Flags::ACK, Vec::new(), now);

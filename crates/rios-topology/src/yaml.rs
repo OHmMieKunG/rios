@@ -20,6 +20,8 @@ struct DeviceDefinition {
     #[serde(rename = "type")]
     kind: DeviceKind,
     interfaces: Vec<InterfaceDefinition>,
+    #[serde(default)]
+    services: Vec<rios_config::ServiceConfig>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -115,6 +117,9 @@ impl Topology {
                 } else {
                     device.ensure_interface(&canonical)?;
                 }
+            }
+            if !definition.services.is_empty() {
+                device.set_services(definition.services)?;
             }
             lab.add_device(&name, device)?;
         }

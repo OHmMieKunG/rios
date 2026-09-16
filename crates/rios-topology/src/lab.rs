@@ -160,6 +160,23 @@ impl Lab {
             if device.running_config().interfaces.is_empty() {
                 output.push_str("      []\n");
             }
+            if !device.services().is_empty() {
+                output.push_str("    services:\n");
+                for service in device.services() {
+                    let kind = match service {
+                        rios_config::ServiceConfig::UdpEcho { .. } => "udp-echo",
+                        rios_config::ServiceConfig::TcpEcho { .. } => "tcp-echo",
+                        rios_config::ServiceConfig::Http { .. } => "http",
+                    };
+                    output.push_str(&format!(
+                        "      - type: {kind}\n        port: {}\n",
+                        service.port()
+                    ));
+                    if let rios_config::ServiceConfig::Http { body, .. } = service {
+                        output.push_str(&format!("        body: {}\n", yaml_text(body)));
+                    }
+                }
+            }
         }
         if self.links.is_empty() {
             return output;
@@ -568,4 +585,21 @@ impl Lab {
 
 fn yaml_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
+}
+
+fn yaml_text(value: &str) -> String {
+    use std::fmt::Write;
+    let mut out = String::from("\"");
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            c if c.is_control() => {
+                let _ = write!(out, "\\u{:04x}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }

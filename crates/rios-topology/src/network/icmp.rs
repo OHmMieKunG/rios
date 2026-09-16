@@ -10,6 +10,17 @@ impl Lab {
         if packet.protocol == IpProtocol::Tcp {
             return self.handle_tcp(device, packet);
         }
+        if packet.protocol == IpProtocol::Udp {
+            if let Some(reply) = self
+                .devices
+                .get_mut(&device)
+                .ok_or_else(|| LabError::UnknownDevice(device.0.to_string()))?
+                .receive_service_udp(&packet)
+            {
+                self.send_ipv4_packet(device, reply)?;
+            }
+            return Ok(());
+        }
         if packet.protocol != IpProtocol::Icmp {
             return Ok(());
         }

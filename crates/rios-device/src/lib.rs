@@ -26,6 +26,7 @@ mod network;
 mod ospf;
 use ospf::OspfRuntime;
 pub use ospf::{OspfNeighborInfo, OspfTransmission};
+mod services;
 mod stp;
 mod subinterface;
 mod tcp;
@@ -139,6 +140,7 @@ pub struct Device {
     stp_errdisabled: BTreeSet<InterfaceId>,
     lacp_neighbors: BTreeMap<InterfaceId, LacpNeighbor>,
     tcp: tcp::TcpRuntime,
+    services: services::ServiceRuntime,
     acl_matches: BTreeMap<(rios_config::AclId, u32), u64>,
     acl_logs: BTreeMap<(rios_config::AclId, u32), u64>,
     acl_log_records: std::collections::VecDeque<AclLog>,
@@ -181,6 +183,8 @@ struct StpInstance {
 /// Rejected state changes leave the device unchanged.
 #[derive(Debug, thiserror::Error)]
 pub enum DeviceError {
+    #[error("invalid simulated host service configuration")]
+    InvalidServiceConfig,
     #[error("invalid BGP process, peer, or routing policy")]
     InvalidBgpConfig,
     #[error("invalid routing policy name, sequence, rule, or capacity")]
@@ -291,6 +295,7 @@ impl Device {
             stp_errdisabled: BTreeSet::new(),
             lacp_neighbors: BTreeMap::new(),
             tcp: tcp::TcpRuntime::default(),
+            services: services::ServiceRuntime::default(),
             acl_matches: BTreeMap::new(),
             acl_logs: BTreeMap::new(),
             acl_log_records: Default::default(),

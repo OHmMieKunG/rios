@@ -1,0 +1,19 @@
+devices:
+  PC1:
+    type: host
+    interfaces: [GigabitEthernet0/0]
+  R1:
+    type: router
+    interfaces: [GigabitEthernet0/0, GigabitEthernet0/1]
+  WEB1:
+    type: host
+    interfaces: [GigabitEthernet0/0]
+    services:
+      - type: http
+        port: 80
+        body: "Hello from RIOS!\n"
+      - type: tcp-echo
+      - type: udp-echo
+links:
+  - endpoints: [PC1:GigabitEthernet0/0, R1:GigabitEthernet0/0]
+  - endpoints: [R1:GigabitEthernet0/1, WEB1:GigabitEthernet0/0]

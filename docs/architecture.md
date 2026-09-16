@@ -639,3 +639,29 @@ ICMP policing (three replies, two drops) with:
 ```sh
 cargo run -- lab examples/two-routers.yaml < examples/qos-session.txt
 ```
+
+## Simulated host applications
+
+Host inventory accepts `services` entries for `udp-echo`, `tcp-echo` and `http`
+(default ports 7, 7 and 80). HTTP entries accept a UTF-8 `body` of at most 32 KiB.
+See `examples/services.yaml`. Service definitions survive topology export/import;
+they describe installed host applications independently of IOS startup text.
+Only hosts accept these applications, with at most 64 listeners and no duplicate
+transport/port pair. Port ownership changes are rejected while TCP connections
+exist, and manual TCP listeners cannot be silently taken over.
+
+Echo behavior follows [RFC 862](https://www.rfc-editor.org/rfc/rfc862.html).
+UDP validates nonzero IPv4 checksums and emits checksummed replies. TCP applications
+consume the existing simulated stream API, honor its send/window backpressure,
+and use its retransmission, idle expiration and FIN handling. Application streams
+are bounded by the TCP connection limit and a single receive/output buffer. Only
+passively accepted connections belong to a service; an active client using the
+same local port is not mistaken for an accepted stream.
+
+The HTTP responder implements a bounded, single-request subset of
+[HTTP/1.1](https://www.rfc-editor.org/rfc/rfc9112.html): GET/HEAD `/`, Content-Length,
+Connection: close, and 400/404/405/431 errors. It accepts fragmented headers up to
+8 KiB, rejects ambiguous framing, and streams responses through ordinary TCP
+backpressure. Request bodies, chunking, persistence, TLS and filesystem serving
+are not supported. All packets traverse ordinary ARP, routing, ACLs, NAT, QoS,
+links and capture; no host OS sockets are opened for these applications.
