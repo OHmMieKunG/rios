@@ -412,3 +412,64 @@ fn device_debug_outputs_real_packets_and_can_be_disabled() {
         "{text}"
     );
 }
+
+#[test]
+fn grade_command_loads_saved_configs_and_returns_a_failing_exit_status() {
+    let temp = std::env::temp_dir();
+    let state = temp.join(format!("rios-grade-state-{}.json", std::process::id()));
+    let objectives = temp.join(format!("rios-grade-failing-{}.yaml", std::process::id()));
+    let _ = std::fs::remove_file(&state);
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rios"))
+        .args(["lab", "examples/services.yaml"])
+        .env("RIOS_STATE_FILE", &state)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let input = include_str!("../examples/services-session.txt")
+        .replace("end\nexit", "end\nwrite memory\nexit");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    let configured = child.wait_with_output().unwrap();
+    assert!(configured.status.success());
+    assert!(!String::from_utf8_lossy(&configured.stdout).contains("% Invalid"));
+    let graded = Command::new(env!("CARGO_BIN_EXE_rios"))
+        .args([
+            "grade",
+            "examples/services.yaml",
+            "examples/services-objectives.yaml",
+        ])
+        .env("RIOS_STATE_FILE", &state)
+        .output()
+        .unwrap();
+    assert!(
+        graded.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&graded.stdout),
+        String::from_utf8_lossy(&graded.stderr)
+    );
+    assert!(String::from_utf8_lossy(&graded.stdout).contains("Score: 8/8"));
+    std::fs::write(
+        &objectives,
+        "settle_ms: 0\nobjectives:\n - unreachable: {from: TYPO, to: 203.0.113.2}\n",
+    )
+    .unwrap();
+    let failed = Command::new(env!("CARGO_BIN_EXE_rios"))
+        .args(["grade", "examples/services.yaml"])
+        .arg(&objectives)
+        .arg("--json")
+        .env("RIOS_STATE_FILE", &state)
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&failed.stdout).unwrap();
+    assert_eq!(report["passed"], 0);
+    assert_eq!(report["results"][0]["error"], true);
+    std::fs::remove_file(state).unwrap();
+    std::fs::remove_file(objectives).unwrap();
+}

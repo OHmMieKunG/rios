@@ -31,6 +31,7 @@ pub struct Lab {
     pub(crate) debug_records: std::collections::VecDeque<DebugRecord>,
     pub(crate) debug_overflow: BTreeMap<DeviceId, u64>,
     pub(crate) next_ping_id: u16,
+    pub(crate) last_local_icmp: Option<(DeviceId, Ipv4Packet)>,
     pub(crate) pending_ipv4: Vec<PendingIpv4>,
     pub(crate) ospf_generations: BTreeMap<DeviceId, u64>,
     pub(crate) stp_generations: BTreeMap<DeviceId, u64>,

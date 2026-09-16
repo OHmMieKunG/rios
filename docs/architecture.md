@@ -727,3 +727,35 @@ entries. `trace_overflow()` and per-device `debug_overflow()` report evictions.
 records. All frontends use the same structured events and virtual timestamps.
 PCAPNG capture remains independent. Packet counts, delivery timing and protocol
 state are covered by enabled-versus-disabled regression tests.
+
+## Lab grading
+
+`rios grade topology.yaml objectives.yaml` loads the topology and its saved
+startup configurations using the same state loader as the terminal. `--json`
+emits a structured report. The process returns nonzero for failed objectives
+or invalid input. Configure and `write memory` on devices before grading a saved
+lab; running configuration in a separate process is not implicitly persisted.
+
+`GradePlan` parses a strict YAML `objectives` list (at most 4096 entries, 1 MiB)
+with optional `settle_ms` (default 60000, maximum one simulated day). Convergence
+advances without collecting an unbounded list of packet outcomes. Checks run in
+document order against the live lab; packet probes advance time and can create
+ARP/NAT/TCP state used by later checks. Repeatability requires the same initial
+lab state and objective order.
+
+Implemented checks cover interface addresses/carrier, exact IPv4 routes, Full
+OSPF neighbor count, Established BGP peer count, VLAN membership, per-VLAN STP
+state, DHCP lease, NAT allocation counters, named ACL entry matches, reachability,
+isolation, maximum RTT, packet loss, HTTP response content, TCP/UDP echo and DNS.
+Configuration and protocol checks inspect typed Rust state, never rendered CLI
+text. Reachability/loss/latency use five actual ICMP probes; loss resolution is
+20 percent and RTT is measured in integer milliseconds. Reachable requires all
+five replies; unreachable requires zero replies (or a validated source with no
+route). Unknown devices/interfaces and malformed requests always fail, including
+isolation objectives. VLAN membership checks configuration, not end-to-end
+forwarding; combine them with reachability checks for functional validation.
+
+`examples/services-objectives.yaml` contains an eight-check service lab. The Rust
+API returns every result, its evidence, an explicit error flag, and the score;
+one failed check does not prevent later checks from running. Path grading and
+IPv6 objectives are not implemented yet.

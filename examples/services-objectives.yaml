@@ -1,0 +1,32 @@
+settle_ms: 1000
+objectives:
+  - interface_address:
+      device: PC1
+      interface: gi0/0
+      address: 10.0.0.2/24
+  - interface_state:
+      device: R1
+      interface: gi0/1
+      up: true
+  - route:
+      device: PC1
+      prefix: 0.0.0.0/0
+      next_hop: 10.0.0.1
+  - reachable:
+      from: PC1
+      to: 203.0.113.2
+  - http:
+      from: PC1
+      to: 203.0.113.2
+      contains: Hello from RIOS!
+  - udp_echo:
+      from: PC1
+      to: 203.0.113.2
+  - tcp_echo:
+      from: PC1
+      to: 203.0.113.2
+  - dns:
+      from: PC1
+      server: 203.0.113.2
+      name: www.lab
+      address: 203.0.113.2

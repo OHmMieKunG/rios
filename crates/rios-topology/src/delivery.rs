@@ -230,6 +230,7 @@ impl Lab {
     }
     /// Process one event, advancing simulated time and returning delivery ownership.
     pub fn step(&mut self) -> Result<Option<EventOutcome>, LabError> {
+        self.last_local_icmp = None;
         let result = self.step_event();
         self.observe_debug_state();
         result
@@ -588,6 +589,18 @@ impl Lab {
                 self.transmit_protocol(port, frame)?;
             }
         }
+        Ok(())
+    }
+    /// Advance without retaining event outcomes, for long convergence and grading runs.
+    pub fn advance_until(&mut self, time: SimTime) -> Result<(), LabError> {
+        if time < self.now() {
+            return Err(ScheduleError::Past.into());
+        }
+        while self.events.next_time().is_some_and(|next| next <= time) {
+            self.step()?;
+        }
+        self.events.advance_to(time)?;
+        self.purge_pending();
         Ok(())
     }
     /// Process events through an inclusive deadline, then advance through idle time.

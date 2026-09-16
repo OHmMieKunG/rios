@@ -125,14 +125,12 @@ impl Lab {
                 payload: echo.encode(),
             };
             self.send_ipv4_packet(source_device, packet)?;
-            let signal = self.drive_until(deadline, |_, outcome| {
-                let EventOutcome::FrameReceived { interface, frame } = outcome else {
-                    return None;
-                };
-                if interface.device != source_device {
+            let signal = self.drive_until(deadline, |lab, _| {
+                let (device, packet) = lab.last_local_icmp.as_ref()?;
+                if *device != source_device {
                     return None;
                 }
-                decode_ping_signal(frame, identifier, sequence, route.source_ip)
+                decode_ping_signal(packet, identifier, sequence, route.source_ip, destination)
             })?;
             match signal {
                 Some(PingSignal::Reply) => {
@@ -174,32 +172,43 @@ enum PingSignal {
 }
 
 fn decode_ping_signal(
-    frame: &EthernetFrame,
+    packet: &Ipv4Packet,
     identifier: u16,
     sequence: u16,
     local_ip: Ipv4Addr,
+    destination: Ipv4Addr,
 ) -> Option<PingSignal> {
-    let untagged;
-    let frame = if frame.ethertype == EtherType::Dot1Q {
-        untagged = frame.untagged().ok()?.1;
-        &untagged
-    } else {
-        frame
-    };
-    if frame.ethertype != EtherType::Ipv4 {
-        return None;
-    }
-    let packet = Ipv4Packet::decode(&frame.payload).ok()?;
     if packet.destination != local_ip || packet.protocol != IpProtocol::Icmp {
         return None;
     }
     if let Ok(echo) = IcmpEcho::decode(&packet.payload) {
-        return (echo.kind == IcmpKind::EchoReply
+        return (packet.source == destination
+            && echo.kind == IcmpKind::EchoReply
             && echo.identifier == identifier
             && echo.sequence == sequence)
             .then_some(PingSignal::Reply);
     }
     let error = IcmpError::decode(&packet.payload).ok()?;
+    let quote = &error.quoted_packet;
+    if quote.len() < 28
+        || quote[0] >> 4 != 4
+        || quote[9] != 1
+        || quote[12..16] != local_ip.octets()
+        || quote[16..20] != destination.octets()
+    {
+        return None;
+    }
+    let header = usize::from(quote[0] & 15) * 4;
+    if header < 20 || quote.len() < header + 8 || rios_ipv4::checksum(&quote[..header]) != 0 {
+        return None;
+    }
+    let echo = &quote[header..];
+    if echo[0] != 8
+        || u16::from_be_bytes([echo[4], echo[5]]) != identifier
+        || u16::from_be_bytes([echo[6], echo[7]]) != sequence
+    {
+        return None;
+    }
     match error.kind {
         IcmpErrorKind::DestinationUnreachable => Some(PingSignal::Unreachable),
         IcmpErrorKind::TimeExceeded => Some(PingSignal::TimeExceeded),

@@ -25,10 +25,15 @@ impl Lab {
         if packet.protocol != IpProtocol::Icmp {
             return Ok(());
         }
+        if IcmpError::decode(&packet.payload).is_ok() {
+            self.last_local_icmp = Some((device, packet));
+            return Ok(());
+        }
         let Ok(echo) = IcmpEcho::decode(&packet.payload) else {
             return Ok(());
         };
-        if echo.kind != IcmpKind::EchoRequest {
+        if echo.kind == IcmpKind::EchoReply {
+            self.last_local_icmp = Some((device, packet));
             return Ok(());
         }
         let reply = IcmpEcho {

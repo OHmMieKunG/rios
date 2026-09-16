@@ -25,6 +25,13 @@ struct Arguments {
 
 #[derive(Subcommand)]
 enum Frontend {
+    /// Grade saved device configuration and real simulated network behavior.
+    Grade {
+        topology: PathBuf,
+        objectives: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
     /// Open an interactive topology shell.
     Lab { topology: Option<PathBuf> },
     /// Serve one SSH listener per device.
@@ -45,6 +52,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logging();
     let (mut app, topology_mode, loaded_topology) = match Arguments::parse().command {
         None => (App::standalone()?, false, false),
+        Some(Frontend::Grade {
+            topology,
+            objectives,
+            json,
+        }) => {
+            let (mut lab, _) = load_lab(&topology)?;
+            let plan = rios_topology::GradePlan::from_yaml(&std::fs::read_to_string(objectives)?)?;
+            let report = plan.evaluate(&mut lab)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print!("{}", report.render());
+            }
+            if !report.success() {
+                return Err("lab objectives failed".into());
+            }
+            return Ok(());
+        }
         Some(Frontend::Lab { topology }) => match topology {
             Some(topology) => {
                 let (lab, state) = load_lab(&topology)?;

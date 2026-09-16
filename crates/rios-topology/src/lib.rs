@@ -4,7 +4,9 @@
 mod capture;
 mod delivery;
 pub use capture::CaptureFilter;
+mod grading;
 mod lab;
+pub use grading::{GradeAddress, GradePlan, GradeReport, GradeResult, GradeStpState, Objective};
 mod qos;
 pub use qos::QosPortStatistics;
 mod network;
