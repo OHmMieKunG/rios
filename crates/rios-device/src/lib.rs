@@ -30,6 +30,7 @@ mod services;
 mod stp;
 mod subinterface;
 mod tcp;
+mod udp;
 pub use dhcp::{DhcpBinding, DhcpLease, DhcpOffer};
 pub use ethernet::{DropReason, MacEntry};
 pub use nat::{NatOutcome, NatProtocol, NatStatistics, NatTranslation};
@@ -44,6 +45,7 @@ use rios_simulator::{DeviceId, InterfaceId, LinkState};
 use rios_switching::{StpPortRole, StpPortState};
 use std::collections::{BTreeMap, BTreeSet};
 pub use tcp::{TcpConnection, TcpError, TcpSocket, TcpState};
+pub use udp::{UdpError, UdpSocket};
 
 /// Supported classes of simulated device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,6 +142,7 @@ pub struct Device {
     stp_errdisabled: BTreeSet<InterfaceId>,
     lacp_neighbors: BTreeMap<InterfaceId, LacpNeighbor>,
     tcp: tcp::TcpRuntime,
+    udp: udp::UdpRuntime,
     services: services::ServiceRuntime,
     acl_matches: BTreeMap<(rios_config::AclId, u32), u64>,
     acl_logs: BTreeMap<(rios_config::AclId, u32), u64>,
@@ -295,6 +298,7 @@ impl Device {
             stp_errdisabled: BTreeSet::new(),
             lacp_neighbors: BTreeMap::new(),
             tcp: tcp::TcpRuntime::default(),
+            udp: udp::UdpRuntime::default(),
             services: services::ServiceRuntime::default(),
             acl_matches: BTreeMap::new(),
             acl_logs: BTreeMap::new(),

@@ -264,3 +264,86 @@ fn large_http_response_respects_tcp_backpressure_and_retransmission() {
             .any(|c| c.retransmissions > 0)
     );
 }
+
+#[test]
+fn application_probes_use_accepted_transport_data_and_release_resources() {
+    for nat in [false, true] {
+        let (mut lab, client, _, _) = setup(nat);
+        let remote = "203.0.113.2".parse().unwrap();
+        assert_eq!(
+            lab.udp_request(client, remote, 7, b"udp probe", 5000)
+                .unwrap(),
+            Some(b"udp probe".to_vec())
+        );
+        assert_eq!(lab.device(client).unwrap().udp_sockets().count(), 0);
+        assert_eq!(
+            lab.tcp_echo(client, remote, 7, b"tcp probe").unwrap(),
+            b"tcp probe"
+        );
+        let response = lab.http_get(client, remote, 80).unwrap();
+        assert!(response.ends_with(b"Hello from RIOS!\n"));
+        assert!(lab.http_get(client, remote, 8080).is_err());
+        assert!(
+            lab.udp_request(client, remote, 9999, b"timeout", 100)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(lab.device(client).unwrap().udp_sockets().count(), 0);
+    }
+}
+
+#[test]
+fn udp_endpoint_peer_filter_and_queue_bounds_hold() {
+    let (mut lab, client, _, _) = setup(false);
+    let socket = rios_device::UdpSocket {
+        local_address: "10.0.0.2".parse().unwrap(),
+        local_port: 52000,
+        remote_address: "203.0.113.2".parse().unwrap(),
+        remote_port: 7,
+    };
+    lab.with_device_mut(client, |d| d.udp_open(socket).unwrap())
+        .unwrap();
+    for index in 0..8 {
+        lab.udp_send(client, 52000, socket.remote_address, 7, &[index])
+            .unwrap();
+    }
+    lab.run_until(SimTime::from_millis(50)).unwrap();
+    lab.with_device_mut(client, |d| {
+        assert_eq!(d.udp_sockets().next().unwrap().1, 4);
+        for index in 0..4 {
+            assert_eq!(d.udp_read(socket).unwrap(), Some(vec![index]));
+        }
+        assert_eq!(d.udp_read(socket).unwrap(), None);
+        let forged = UdpDatagram {
+            source_port: 8,
+            destination_port: 52000,
+            payload: b"wrong peer".to_vec(),
+        };
+        d.receive_udp(&Ipv4Packet {
+            dscp_ecn: 0,
+            source: socket.remote_address,
+            destination: socket.local_address,
+            ttl: 64,
+            protocol: IpProtocol::Udp,
+            payload: forged
+                .encode_ipv4(socket.remote_address, socket.local_address)
+                .unwrap(),
+        });
+        assert_eq!(d.udp_read(socket).unwrap(), None);
+        for port in 52001..52064 {
+            d.udp_open(rios_device::UdpSocket {
+                local_port: port,
+                ..socket
+            })
+            .unwrap();
+        }
+        assert_eq!(
+            d.udp_open(rios_device::UdpSocket {
+                local_port: 52064,
+                ..socket
+            }),
+            Err(rios_device::UdpError::Capacity)
+        );
+    })
+    .unwrap();
+}

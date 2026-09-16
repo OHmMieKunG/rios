@@ -137,6 +137,8 @@ pub struct TraceRecord {
 /// Topology, device, scheduling, and delivery failures.
 #[derive(Debug, thiserror::Error)]
 pub enum LabError {
+    #[error(transparent)]
+    Udp(#[from] rios_device::UdpError),
     #[error("no IPv6 route or usable source address for {0}")]
     NoIpv6Route(std::net::Ipv6Addr),
     #[error(transparent)]

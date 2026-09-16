@@ -40,7 +40,7 @@ impl Device {
             }
         }
         // Avoid changing the owner of an existing application stream or manual listener.
-        if !self.tcp_connections().is_empty() {
+        if !self.tcp_connections().is_empty() || self.udp_sockets().next().is_some() {
             return Err(DeviceError::InvalidServiceConfig);
         }
         let mut listeners = self.tcp.listeners.clone();

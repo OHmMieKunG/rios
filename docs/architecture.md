@@ -665,3 +665,12 @@ Connection: close, and 400/404/405/431 errors. It accepts fragmented headers up 
 backpressure. Request bodies, chunking, persistence, TLS and filesystem serving
 are not supported. All packets traverse ordinary ARP, routing, ACLs, NAT, QoS,
 links and capture; no host OS sockets are opened for these applications.
+
+Lab probes `http <device> <IPv4> [port]`, `tcp-echo <device> <IPv4> [port]`
+and `udp-echo <device> <IPv4> [port]` drive the same simulated transports.
+Run `cargo run -- lab examples/services.yaml < examples/services-session.txt`.
+TCP probes use a ten-second virtual deadline and at most 65535 response bytes.
+UDP probes create peer-filtered endpoints after route resolution, consume only
+locally delivered datagrams, and release endpoints on success, timeout or error.
+Each device permits 64 explicit UDP endpoints with four datagrams per endpoint;
+excess datagrams are dropped. Probes use deterministic available ephemeral ports.

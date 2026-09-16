@@ -15,7 +15,7 @@ impl Lab {
                 .devices
                 .get_mut(&device)
                 .ok_or_else(|| LabError::UnknownDevice(device.0.to_string()))?
-                .receive_service_udp(&packet)
+                .receive_udp(&packet)
             {
                 self.send_ipv4_packet(device, reply)?;
             }

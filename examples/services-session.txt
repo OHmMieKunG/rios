@@ -1,0 +1,35 @@
+connect PC1
+enable
+configure terminal
+interface gi0/0
+ip address 10.0.0.2 255.255.255.0
+no shutdown
+exit
+ip route 0.0.0.0 0.0.0.0 10.0.0.1
+end
+exit
+connect R1
+enable
+configure terminal
+interface gi0/0
+ip address 10.0.0.1 255.255.255.0
+no shutdown
+interface gi0/1
+ip address 203.0.113.1 255.255.255.0
+no shutdown
+end
+exit
+connect WEB1
+enable
+configure terminal
+interface gi0/0
+ip address 203.0.113.2 255.255.255.0
+no shutdown
+exit
+ip route 0.0.0.0 0.0.0.0 203.0.113.1
+end
+exit
+http PC1 203.0.113.2
+tcp-e PC1 203.0.113.2
+udp-e PC1 203.0.113.2
+exit

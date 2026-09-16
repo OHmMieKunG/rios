@@ -352,3 +352,27 @@ fn qos_policy_cli_changes_actual_ping_delivery() {
         assert!(text.contains(expected), "missing {expected}:\n{text}");
     }
 }
+
+#[test]
+fn host_services_are_usable_from_the_lab_cli() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rios"))
+        .args(["lab", "examples/services.yaml"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(include_bytes!("../examples/services-session.txt"))
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(!text.contains('%'), "{text}");
+    assert!(text.contains("HTTP/1.1 200 OK"), "{text}");
+    assert!(text.contains("Hello from RIOS!"));
+    assert_eq!(text.matches("Echo reply: 15 bytes").count(), 2, "{text}");
+}

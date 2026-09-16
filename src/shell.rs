@@ -15,6 +15,9 @@ const COMMANDS: &[(&str, &str)] = &[
     ("links", "Show virtual links"),
     ("trace", "Enable or disable packet tracing"),
     ("capture", "Record Ethernet packets in a PCAPNG file"),
+    ("http", "Fetch / over simulated TCP from a device"),
+    ("tcp-echo", "Probe a simulated TCP echo service"),
+    ("udp-echo", "Probe a simulated UDP echo service"),
     ("step", "Process one event"),
     ("run", "Advance to an absolute simulated millisecond"),
     ("help", "Show lab commands"),
@@ -107,6 +110,24 @@ pub fn complete(input: &str, names: &[String]) -> Vec<Suggestion> {
     };
     let args = &prior[1..];
     match command {
+        "http" | "tcp-echo" | "udp-echo" if args.is_empty() => names
+            .iter()
+            .filter(|name| {
+                name.to_ascii_lowercase()
+                    .starts_with(&partial.to_ascii_lowercase())
+            })
+            .map(|name| Suggestion {
+                word: name.clone(),
+                help: "Source device".into(),
+                start,
+            })
+            .collect(),
+        "http" | "tcp-echo" | "udp-echo" if args.len() == 1 => {
+            placeholder("<ipv4>", "Destination address", start)
+        }
+        "http" | "tcp-echo" | "udp-echo" if args.len() == 2 => {
+            placeholder("<port>", "Optional service port (HTTP 80, echo 7)", start)
+        }
         "capture" if args.is_empty() => matching(CAPTURE_ACTIONS, partial, start),
         "capture" if resolve(args[0], CAPTURE_ACTIONS) == Ok("start") && args.len() == 1 => {
             placeholder("<path>", "New PCAPNG file", start)
@@ -216,6 +237,7 @@ pub fn process(app: &mut App, input: &str) -> bool {
     let args = &tokens[1..];
     let result = match (command, args) {
         ("capture", args) => capture(app, args),
+        ("http" | "tcp-echo" | "udp-echo", args) => service_probe(app, command, args),
         ("spawn", args) => spawn(app, args),
         ("connect", [first, second]) => link(app, first, second, 1),
         ("link", [first, second]) => link(app, first, second, 1),
@@ -462,6 +484,46 @@ fn capture(app: &mut App, args: &[&str]) -> Result<(), rios_topology::LabError> 
                 "expected start <file.pcapng> or stop".into(),
             ));
         }
+    }
+    Ok(())
+}
+
+fn service_probe(
+    app: &mut App,
+    command: &str,
+    args: &[&str],
+) -> Result<(), rios_topology::LabError> {
+    use rios_topology::LabError;
+    if !(2..=3).contains(&args.len()) {
+        return Err(LabError::Protocol(
+            "expected source device, IPv4 address and optional port".into(),
+        ));
+    }
+    let device = app.lab.device_id(args[0])?;
+    let address = args[1]
+        .parse()
+        .map_err(|_| LabError::Protocol("invalid IPv4 address".into()))?;
+    let port = args
+        .get(2)
+        .map(|p| p.parse::<u16>())
+        .transpose()
+        .map_err(|_| LabError::Protocol("invalid service port".into()))?
+        .unwrap_or(if command == "http" { 80 } else { 7 });
+    let sent = b"RIOS echo probe";
+    let response = match command {
+        "http" => app.lab.http_get(device, address, port)?,
+        "tcp-echo" => app.lab.tcp_echo(device, address, port, sent)?,
+        _ => app
+            .lab
+            .udp_request(device, address, port, sent, 5000)?
+            .ok_or_else(|| LabError::Protocol("UDP echo timed out".into()))?,
+    };
+    if command == "http" {
+        println!("{}", String::from_utf8_lossy(&response));
+    } else if response == sent {
+        println!("Echo reply: {} bytes", response.len());
+    } else {
+        return Err(LabError::Protocol("echo payload mismatch".into()));
     }
     Ok(())
 }
