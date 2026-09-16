@@ -47,7 +47,7 @@ pub struct DhcpOffer {
 impl Device {
     /// Create or select a DHCP server pool.
     pub fn ensure_dhcp_pool(&mut self, name: &str) -> Result<DhcpPoolId, DeviceError> {
-        if !self.supports_routing() {
+        if !self.supports_routing() && self.device_type() != DeviceType::Host {
             return Err(DeviceError::DhcpUnsupported);
         }
         if name.is_empty() || name.len() > 32 || !name.bytes().all(|byte| byte.is_ascii_graphic()) {

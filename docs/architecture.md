@@ -674,3 +674,25 @@ UDP probes create peer-filtered endpoints after route resolution, consume only
 locally delivered datagrams, and release endpoints on success, timeout or error.
 Each device permits 64 explicit UDP endpoints with four datagrams per endpoint;
 excess datagrams are dropped. Probes use deterministic available ephemeral ports.
+
+DNS services add a static `records` map and optional `ttl` (300 seconds by default)
+on UDP port 53. Names are normalized case-insensitively; each service permits
+4096 records. The bounded [RFC 1035](https://www.rfc-editor.org/rfc/rfc1035.html)
+codec handles one question, compressed answer names, IN A records, NXDOMAIN and
+empty answers for other types at known names. Classic messages are limited to
+512 bytes. Recursive resolution, zone transfer, DNSSEC, EDNS and TCP DNS are not
+implemented. `dns <device> <server-IPv4> <name> [port]` validates transaction ID
+and question against the actual received response.
+
+NTP services answer v3/v4 client requests on UDP port 123 with stratum-1 server
+packets and echoed origin timestamps. Their clock is `epoch_seconds` plus integer
+simulation time; the default epoch is 2024-01-01 UTC. The base wire format follows
+[RFC 5905](https://www.rfc-editor.org/rfc/rfc5905.html), using 32.32 integer
+seconds/fractions. `ntp <device> <server-IPv4> [port]` validates the server response.
+This is a lightweight time service, without clock discipline, authentication,
+extensions or changing the lab/OS clock.
+
+Hosts can also run the existing DHCP server using the shared `ip dhcp pool` and
+excluded-address configuration APIs. They serve routed relay clients without
+acquiring transit-forwarding capability. DHCP remains structured IOS configuration,
+so its pools and options reuse existing rendering, persistence and lease handling.

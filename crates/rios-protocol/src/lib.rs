@@ -11,3 +11,8 @@ pub use dhcp::{DhcpMessage, DhcpMessageType, DhcpPacketError};
 pub use icmp::{IcmpEcho, IcmpError, IcmpErrorKind, IcmpKind, IcmpPacketError};
 pub use tcp::{TcpFlags, TcpPacketError, TcpSegment};
 pub use udp::{UdpDatagram, UdpPacketError};
+
+mod dns;
+mod ntp;
+pub use dns::{DnsARecord, DnsError, DnsMessage, DnsQuestion, dns_name};
+pub use ntp::{NtpError, NtpPacket, NtpTimestamp};

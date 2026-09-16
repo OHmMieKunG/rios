@@ -374,5 +374,7 @@ fn host_services_are_usable_from_the_lab_cli() {
     assert!(!text.contains('%'), "{text}");
     assert!(text.contains("HTTP/1.1 200 OK"), "{text}");
     assert!(text.contains("Hello from RIOS!"));
+    assert!(text.contains("www.lab resolves to 203.0.113.2"));
+    assert!(text.contains("NTP stratum 1"));
     assert_eq!(text.matches("Echo reply: 15 bytes").count(), 2, "{text}");
 }

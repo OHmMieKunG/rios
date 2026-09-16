@@ -319,16 +319,19 @@ fn udp_endpoint_peer_filter_and_queue_bounds_hold() {
             destination_port: 52000,
             payload: b"wrong peer".to_vec(),
         };
-        d.receive_udp(&Ipv4Packet {
-            dscp_ecn: 0,
-            source: socket.remote_address,
-            destination: socket.local_address,
-            ttl: 64,
-            protocol: IpProtocol::Udp,
-            payload: forged
-                .encode_ipv4(socket.remote_address, socket.local_address)
-                .unwrap(),
-        });
+        d.receive_udp(
+            &Ipv4Packet {
+                dscp_ecn: 0,
+                source: socket.remote_address,
+                destination: socket.local_address,
+                ttl: 64,
+                protocol: IpProtocol::Udp,
+                payload: forged
+                    .encode_ipv4(socket.remote_address, socket.local_address)
+                    .unwrap(),
+            },
+            SimTime(0),
+        );
         assert_eq!(d.udp_read(socket).unwrap(), None);
         for port in 52001..52064 {
             d.udp_open(rios_device::UdpSocket {
@@ -344,6 +347,90 @@ fn udp_endpoint_peer_filter_and_queue_bounds_hold() {
             }),
             Err(rios_device::UdpError::Capacity)
         );
+    })
+    .unwrap();
+}
+
+#[test]
+fn dns_and_ntp_cross_routing_and_pat_with_deterministic_timestamps() {
+    for nat in [false, true] {
+        let mut outcomes = Vec::new();
+        for _ in 0..2 {
+            let (mut lab, client, server, _) = setup(nat);
+            let remote = "203.0.113.2".parse().unwrap();
+            assert_eq!(
+                lab.dns_lookup(client, remote, 53, "WWW.LAB.").unwrap(),
+                Some(remote)
+            );
+            assert_eq!(
+                lab.dns_lookup(client, remote, 53, "missing.lab").unwrap(),
+                None
+            );
+            let mut query = rios_protocol::DnsMessage::query(400, "www.lab").unwrap();
+            query.question.kind = 28;
+            let response = lab
+                .udp_request(client, remote, 53, &query.encode().unwrap(), 1000)
+                .unwrap()
+                .unwrap();
+            let response = rios_protocol::DnsMessage::decode(&response).unwrap();
+            assert_eq!(response.rcode, 0);
+            assert!(response.answers.is_empty());
+            let before = lab.now();
+            let ntp = lab.ntp_query(client, remote, 123).unwrap();
+            assert_eq!(
+                ntp.origin,
+                rios_protocol::NtpTimestamp::from_simulation(1_704_067_200, before.0)
+            );
+            assert_eq!(
+                ntp.receive,
+                rios_protocol::NtpTimestamp::from_simulation(1_704_067_200, before.0 + 2000)
+            );
+            assert_eq!(ntp.receive, ntp.transmit);
+            assert_eq!(lab.now().0, before.0 + 4000);
+            outcomes.push((ntp, lab.now()));
+            let restored = Topology::from_yaml(&lab.render_yaml())
+                .unwrap()
+                .build()
+                .unwrap();
+            assert_eq!(
+                restored.device(server).unwrap().services(),
+                lab.device(server).unwrap().services()
+            );
+            assert!(
+                lab.udp_request(client, remote, 53, &[0xff; 80], 50)
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(
+                lab.udp_request(client, remote, 123, &[0xff; 48], 50)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        assert_eq!(outcomes[0], outcomes[1]);
+    }
+}
+
+#[test]
+fn dns_inventory_rejects_invalid_and_duplicate_canonical_names() {
+    let (mut lab, _, server, _) = setup(false);
+    lab.with_device_mut(server, |d| {
+        let before = d.clone();
+        for names in [vec!["bad..name"], vec!["WWW.lab", "www.lab."]] {
+            let records = names
+                .into_iter()
+                .map(|n| (n.to_owned(), "192.0.2.1".parse().unwrap()))
+                .collect();
+            assert!(
+                d.set_services(vec![ServiceConfig::Dns {
+                    port: 53,
+                    ttl: 300,
+                    records
+                }])
+                .is_err()
+            );
+            assert_eq!(*d, before);
+        }
     })
     .unwrap();
 }

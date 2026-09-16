@@ -116,3 +116,73 @@ impl Lab {
         }
     }
 }
+
+impl Lab {
+    /// Resolve one A record with an actual UDP DNS exchange; NXDOMAIN returns None.
+    pub fn dns_lookup(
+        &mut self,
+        device: DeviceId,
+        server: Ipv4Addr,
+        port: u16,
+        name: &str,
+    ) -> Result<Option<Ipv4Addr>, LabError> {
+        let id = self.next_ping_id;
+        self.next_ping_id = self.next_ping_id.wrapping_add(1);
+        let query = rios_protocol::DnsMessage::query(id, name)
+            .map_err(|e| LabError::Protocol(e.to_string()))?;
+        let bytes = query
+            .encode()
+            .map_err(|e| LabError::Protocol(e.to_string()))?;
+        let bytes = self
+            .udp_request(device, server, port, &bytes, 5000)?
+            .ok_or_else(|| LabError::Protocol("DNS request timed out".into()))?;
+        let response = rios_protocol::DnsMessage::decode(&bytes)
+            .map_err(|e| LabError::Protocol(e.to_string()))?;
+        if !response.response || response.id != id || response.question != query.question {
+            return Err(LabError::Protocol(
+                "DNS response does not match query".into(),
+            ));
+        }
+        if response.rcode == 3 {
+            return Ok(None);
+        }
+        if response.rcode != 0 {
+            return Err(LabError::Protocol(format!(
+                "DNS response code {}",
+                response.rcode
+            )));
+        }
+        Ok(response
+            .answers
+            .into_iter()
+            .find(|a| a.name == query.question.name)
+            .map(|a| a.address))
+    }
+    /// Query a simulated NTP server without changing the event clock or host OS clock.
+    pub fn ntp_query(
+        &mut self,
+        device: DeviceId,
+        server: Ipv4Addr,
+        port: u16,
+    ) -> Result<rios_protocol::NtpPacket, LabError> {
+        let request = rios_protocol::NtpPacket::request(
+            rios_protocol::NtpTimestamp::from_simulation(1_704_067_200, self.now().0),
+        );
+        let bytes = request
+            .encode()
+            .map_err(|e| LabError::Protocol(e.to_string()))?;
+        let bytes = self
+            .udp_request(device, server, port, &bytes, 5000)?
+            .ok_or_else(|| LabError::Protocol("NTP request timed out".into()))?;
+        let response = rios_protocol::NtpPacket::decode(&bytes)
+            .map_err(|e| LabError::Protocol(e.to_string()))?;
+        if response.mode != 4
+            || response.origin != request.transmit
+            || response.leap == 3
+            || !(1..=15).contains(&response.stratum)
+        {
+            return Err(LabError::Protocol("invalid NTP server response".into()));
+        }
+        Ok(response)
+    }
+}

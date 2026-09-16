@@ -1,4 +1,5 @@
 //! Bounded host applications driven by simulated packet delivery and TCP timers.
+mod datagram;
 mod http;
 use crate::{Device, DeviceError, DeviceType, TcpSocket, TcpState};
 use rios_config::ServiceConfig;
@@ -25,9 +26,25 @@ impl Device {
     }
 
     /// Install a validated host service inventory before opening any application connections.
-    pub fn set_services(&mut self, definitions: Vec<ServiceConfig>) -> Result<(), DeviceError> {
+    pub fn set_services(&mut self, mut definitions: Vec<ServiceConfig>) -> Result<(), DeviceError> {
         if self.device_type() != DeviceType::Host || definitions.len() > 64 {
             return Err(DeviceError::InvalidServiceConfig);
+        }
+        for service in &mut definitions {
+            if let ServiceConfig::Dns { records, .. } = service {
+                if records.len() > 4096 {
+                    return Err(DeviceError::InvalidServiceConfig);
+                }
+                let mut normalized = BTreeMap::new();
+                for (name, address) in records.iter() {
+                    let name = rios_protocol::dns_name(name)
+                        .map_err(|_| DeviceError::InvalidServiceConfig)?;
+                    if normalized.insert(name, *address).is_some() {
+                        return Err(DeviceError::InvalidServiceConfig);
+                    }
+                }
+                *records = normalized;
+            }
         }
         let mut ports = BTreeSet::new();
         for service in &definitions {
@@ -64,7 +81,11 @@ impl Device {
     }
 
     /// Generate a reply only for a valid, addressed UDP service request.
-    pub fn receive_service_udp(&mut self, incoming: &Ipv4Packet) -> Option<Ipv4Packet> {
+    pub fn receive_service_udp(
+        &mut self,
+        incoming: &Ipv4Packet,
+        now: SimTime,
+    ) -> Option<Ipv4Packet> {
         if incoming.protocol != IpProtocol::Udp
             || !self.owns_any_ipv4(incoming.destination)
             || incoming.source.is_unspecified()
@@ -79,11 +100,16 @@ impl Device {
         if request.source_port == 0 {
             return None;
         }
-        self.services.definitions.iter().find(|service| matches!(service, ServiceConfig::UdpEcho { port } if *port == request.destination_port))?;
+        let service = self
+            .services
+            .definitions
+            .iter()
+            .find(|service| !service.is_tcp() && service.port() == request.destination_port)?;
+        let payload = datagram::reply(service, &request.payload, now)?;
         let reply = UdpDatagram {
             source_port: request.destination_port,
             destination_port: request.source_port,
-            payload: request.payload,
+            payload,
         };
         Some(Ipv4Packet {
             dscp_ecn: 0,
@@ -142,7 +168,9 @@ impl Device {
                             stream.close = true;
                         }
                     }
-                    ServiceConfig::UdpEcho { .. } => {}
+                    ServiceConfig::UdpEcho { .. }
+                    | ServiceConfig::Dns { .. }
+                    | ServiceConfig::Ntp { .. } => {}
                 }
             }
             if capacity > 0 && !stream.output.is_empty() {

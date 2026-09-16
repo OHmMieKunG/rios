@@ -78,7 +78,11 @@ impl Device {
             .map(|(socket, queue)| (socket, queue.len()))
     }
     /// Deliver valid unicast UDP to an application or installed service.
-    pub fn receive_udp(&mut self, packet: &Ipv4Packet) -> Option<Ipv4Packet> {
+    pub fn receive_udp(
+        &mut self,
+        packet: &Ipv4Packet,
+        now: rios_simulator::SimTime,
+    ) -> Option<Ipv4Packet> {
         if packet.protocol != IpProtocol::Udp || !self.owns_any_ipv4(packet.destination) {
             return None;
         }
@@ -96,6 +100,6 @@ impl Device {
             }
             return None;
         }
-        self.receive_service_udp(packet)
+        self.receive_service_udp(packet, now)
     }
 }

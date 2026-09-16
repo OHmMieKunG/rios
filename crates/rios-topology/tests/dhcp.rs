@@ -4,8 +4,11 @@ use rios_simulator::SimTime;
 use rios_topology::{Lab, Topology};
 
 fn relay_lab() -> Lab {
+    relay_lab_with_server("router")
+}
+fn relay_lab_with_server(kind: &str) -> Lab {
     let mut lab = Topology::from_yaml(
-        r#"
+        &r#"
 devices:
   PC: {type: host, interfaces: [GigabitEthernet0/0]}
   R1: {type: router, interfaces: [GigabitEthernet0/0, GigabitEthernet0/1]}
@@ -15,7 +18,8 @@ links:
   - endpoints: ["PC:GigabitEthernet0/0", "R1:GigabitEthernet0/0"]
   - endpoints: ["R1:GigabitEthernet0/1", "R2:GigabitEthernet0/0"]
   - endpoints: ["R2:GigabitEthernet0/1", "SERVER:GigabitEthernet0/0"]
-"#,
+"#
+        .replace("SERVER: {type: router", &format!("SERVER: {{type: {kind}")),
     )
     .unwrap()
     .build()
@@ -374,4 +378,23 @@ fn reserved_client_receives_fixed_address_and_wrong_request_gets_nak() {
         };
         message.message_type == DhcpMessageType::Nak && message.transaction_id == 123456
     }));
+}
+
+#[test]
+fn host_server_uses_existing_dhcp_relay_and_lease_engine() {
+    let mut lab = relay_lab_with_server("host");
+    lab.run_until(SimTime::from_millis(10000)).unwrap();
+    let client = lab.endpoint("PC:gi0/0").unwrap();
+    let lease = lab
+        .device(client.device)
+        .unwrap()
+        .dhcp_lease(client.interface)
+        .unwrap();
+    assert_eq!(lease.server_id.to_string(), "10.100.0.10");
+    assert_eq!(lease.address.to_string(), "10.10.0.20");
+    assert!(
+        !lab.device(lab.device_id("SERVER").unwrap())
+            .unwrap()
+            .ipv4_forwarding_enabled()
+    );
 }

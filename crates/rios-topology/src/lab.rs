@@ -167,11 +167,25 @@ impl Lab {
                         rios_config::ServiceConfig::UdpEcho { .. } => "udp-echo",
                         rios_config::ServiceConfig::TcpEcho { .. } => "tcp-echo",
                         rios_config::ServiceConfig::Http { .. } => "http",
+                        rios_config::ServiceConfig::Dns { .. } => "dns",
+                        rios_config::ServiceConfig::Ntp { .. } => "ntp",
                     };
                     output.push_str(&format!(
                         "      - type: {kind}\n        port: {}\n",
                         service.port()
                     ));
+                    if let rios_config::ServiceConfig::Dns { records, ttl, .. } = service {
+                        output.push_str(&format!("        ttl: {ttl}\n        records:\n"));
+                        if records.is_empty() {
+                            output.push_str("          {}\n");
+                        }
+                        for (name, address) in records {
+                            output.push_str(&format!("          {}: {address}\n", yaml_text(name)));
+                        }
+                    }
+                    if let rios_config::ServiceConfig::Ntp { epoch_seconds, .. } = service {
+                        output.push_str(&format!("        epoch_seconds: {epoch_seconds}\n"));
+                    }
                     if let rios_config::ServiceConfig::Http { body, .. } = service {
                         output.push_str(&format!("        body: {}\n", yaml_text(body)));
                     }

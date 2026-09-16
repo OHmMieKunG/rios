@@ -16,6 +16,8 @@ const COMMANDS: &[(&str, &str)] = &[
     ("trace", "Enable or disable packet tracing"),
     ("capture", "Record Ethernet packets in a PCAPNG file"),
     ("http", "Fetch / over simulated TCP from a device"),
+    ("dns", "Resolve a name through a simulated DNS server"),
+    ("ntp", "Query a simulated NTP server"),
     ("tcp-echo", "Probe a simulated TCP echo service"),
     ("udp-echo", "Probe a simulated UDP echo service"),
     ("step", "Process one event"),
@@ -110,7 +112,7 @@ pub fn complete(input: &str, names: &[String]) -> Vec<Suggestion> {
     };
     let args = &prior[1..];
     match command {
-        "http" | "tcp-echo" | "udp-echo" if args.is_empty() => names
+        "http" | "tcp-echo" | "udp-echo" | "dns" | "ntp" if args.is_empty() => names
             .iter()
             .filter(|name| {
                 name.to_ascii_lowercase()
@@ -122,10 +124,12 @@ pub fn complete(input: &str, names: &[String]) -> Vec<Suggestion> {
                 start,
             })
             .collect(),
-        "http" | "tcp-echo" | "udp-echo" if args.len() == 1 => {
+        "http" | "tcp-echo" | "udp-echo" | "dns" | "ntp" if args.len() == 1 => {
             placeholder("<ipv4>", "Destination address", start)
         }
-        "http" | "tcp-echo" | "udp-echo" if args.len() == 2 => {
+        "dns" if args.len() == 2 => placeholder("<name>", "DNS hostname", start),
+        "dns" if args.len() == 3 => placeholder("<port>", "Optional DNS port (53)", start),
+        "http" | "tcp-echo" | "udp-echo" | "dns" | "ntp" if args.len() == 2 => {
             placeholder("<port>", "Optional service port (HTTP 80, echo 7)", start)
         }
         "capture" if args.is_empty() => matching(CAPTURE_ACTIONS, partial, start),
@@ -237,7 +241,9 @@ pub fn process(app: &mut App, input: &str) -> bool {
     let args = &tokens[1..];
     let result = match (command, args) {
         ("capture", args) => capture(app, args),
-        ("http" | "tcp-echo" | "udp-echo", args) => service_probe(app, command, args),
+        ("http" | "tcp-echo" | "udp-echo" | "dns" | "ntp", args) => {
+            service_probe(app, command, args)
+        }
         ("spawn", args) => spawn(app, args),
         ("connect", [first, second]) => link(app, first, second, 1),
         ("link", [first, second]) => link(app, first, second, 1),
@@ -494,21 +500,44 @@ fn service_probe(
     args: &[&str],
 ) -> Result<(), rios_topology::LabError> {
     use rios_topology::LabError;
-    if !(2..=3).contains(&args.len()) {
+    let required = if command == "dns" { 3 } else { 2 };
+    if !(required..=required + 1).contains(&args.len()) {
         return Err(LabError::Protocol(
-            "expected source device, IPv4 address and optional port".into(),
+            "expected source device, IPv4 address, DNS hostname if applicable, and optional port"
+                .into(),
         ));
     }
     let device = app.lab.device_id(args[0])?;
     let address = args[1]
         .parse()
         .map_err(|_| LabError::Protocol("invalid IPv4 address".into()))?;
+    let default_port = match command {
+        "http" => 80,
+        "dns" => 53,
+        "ntp" => 123,
+        _ => 7,
+    };
     let port = args
-        .get(2)
+        .get(required)
         .map(|p| p.parse::<u16>())
         .transpose()
         .map_err(|_| LabError::Protocol("invalid service port".into()))?
-        .unwrap_or(if command == "http" { 80 } else { 7 });
+        .unwrap_or(default_port);
+    if command == "dns" {
+        match app.lab.dns_lookup(device, address, port, args[2])? {
+            Some(resolved) => println!("{} resolves to {resolved}", args[2]),
+            None => println!("{}: no A record", args[2]),
+        }
+        return Ok(());
+    }
+    if command == "ntp" {
+        let response = app.lab.ntp_query(device, address, port)?;
+        println!(
+            "NTP stratum {}, transmit timestamp {:016x}",
+            response.stratum, response.transmit.0
+        );
+        return Ok(());
+    }
     let sent = b"RIOS echo probe";
     let response = match command {
         "http" => app.lab.http_get(device, address, port)?,

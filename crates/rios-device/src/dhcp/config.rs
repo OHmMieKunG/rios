@@ -52,7 +52,7 @@ impl Device {
         first: Ipv4Addr,
         last: Ipv4Addr,
     ) -> Result<(), DeviceError> {
-        if !self.supports_routing() {
+        if !self.supports_routing() && self.device_type() != DeviceType::Host {
             return Err(DeviceError::DhcpUnsupported);
         }
         if first > last

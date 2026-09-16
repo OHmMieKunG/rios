@@ -11,11 +11,12 @@ impl Lab {
             return self.handle_tcp(device, packet);
         }
         if packet.protocol == IpProtocol::Udp {
+            let now = self.now();
             if let Some(reply) = self
                 .devices
                 .get_mut(&device)
                 .ok_or_else(|| LabError::UnknownDevice(device.0.to_string()))?
-                .receive_udp(&packet)
+                .receive_udp(&packet, now)
             {
                 self.send_ipv4_packet(device, reply)?;
             }
