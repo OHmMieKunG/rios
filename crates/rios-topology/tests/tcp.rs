@@ -236,3 +236,32 @@ fn protocol_owned_idle_timeout_backpressure_and_abort_use_real_tcp_state() {
         TcpState::Closed
     );
 }
+
+#[test]
+fn simultaneous_close_reaches_time_wait_without_an_ack_storm() {
+    let (mut lab, a, b) = setup();
+    lab.tcp_listen(b, 80).unwrap();
+    let socket = lab
+        .tcp_connect(a, 53000, "10.0.0.2".parse().unwrap(), 80)
+        .unwrap();
+    lab.run_until(SimTime::from_millis(20)).unwrap();
+    lab.tcp_close(a, socket).unwrap();
+    lab.tcp_close(b, reverse(socket)).unwrap();
+    let events = lab.run_until(SimTime::from_millis(1000)).unwrap();
+    let received = events
+        .iter()
+        .filter(|event| matches!(event, EventOutcome::FrameReceived { .. }))
+        .count();
+    assert_eq!(received, 4, "two FINs and two ACKs, then silence");
+    assert_eq!(
+        lab.device(a).unwrap().tcp_connections()[&socket].state,
+        TcpState::TimeWait
+    );
+    assert_eq!(
+        lab.device(b).unwrap().tcp_connections()[&reverse(socket)].state,
+        TcpState::TimeWait
+    );
+    lab.run_until(SimTime::from_millis(122000)).unwrap();
+    assert!(lab.device(a).unwrap().tcp_connections().is_empty());
+    assert!(lab.device(b).unwrap().tcp_connections().is_empty());
+}

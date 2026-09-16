@@ -171,6 +171,16 @@ impl TcpConnection {
             }
             return None;
         }
+        if self.state == TcpState::TimeWait {
+            // Re-ACK retransmitted FIN/data, never ACK a pure ACK (simultaneous-close loop).
+            if segment.flags.contains(Flags::FIN)
+                && segment.sequence.wrapping_add(segment.sequence_len()) == self.receive_next
+            {
+                self.enter_time_wait(now);
+            }
+            return (segment.sequence_len() != 0)
+                .then(|| self.segment(socket, Flags::ACK, Vec::new()));
+        }
         if self.state == TcpState::SynSent {
             if segment.flags.contains(Flags::SYN | Flags::ACK)
                 && segment.acknowledgment == self.send_next
@@ -216,9 +226,6 @@ impl TcpConnection {
         }
         self.last_activity = now;
         self.peer_window = segment.window;
-        if self.state == TcpState::TimeWait {
-            return Some(self.segment(socket, Flags::ACK, Vec::new()));
-        }
         if self.peer_closed {
             return None;
         }
