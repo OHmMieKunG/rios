@@ -56,7 +56,7 @@ impl Ipv4Network {
 }
 
 /// Source code and future protocol ownership of a route.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RouteSource {
     Connected,
     Static,
@@ -69,7 +69,7 @@ pub enum RouteSource {
 }
 
 /// One route candidate.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Route {
     /// Destination prefix.
     pub prefix: Ipv4Network,

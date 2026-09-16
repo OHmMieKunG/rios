@@ -26,11 +26,13 @@ impl Lab {
         };
         let mut forwarded = packet;
         let now = self.now();
+        let before_nat = NatTuple::from(&forwarded);
         let translated = self
             .devices
             .get_mut(&interface.device)
             .unwrap()
             .nat_outbound(interface.interface, route.interface, &mut forwarded, now);
+        self.trace_nat(interface, before_nat, &forwarded);
         if translated == rios_device::NatOutcome::Drop {
             self.devices
                 .get_mut(&interface.device)

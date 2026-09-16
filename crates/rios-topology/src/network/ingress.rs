@@ -21,7 +21,7 @@ impl Lab {
         frame: &EthernetFrame,
     ) -> Result<(), LabError> {
         let Ok(mut packet) = Ipv4Packet::decode(&frame.payload) else {
-            return Ok(());
+            return self.packet_drop(interface, frame, DropReason::MalformedPacket);
         };
         if !self
             .devices
@@ -62,11 +62,13 @@ impl Lab {
             return self.handle_ospf(interface, packet);
         }
         if self.device(interface.device)?.ipv4_forwarding_enabled() {
+            let before_nat = NatTuple::from(&packet);
             let now = self.now();
             self.devices
                 .get_mut(&interface.device)
                 .unwrap()
                 .translate_nat_inbound(interface.interface, &mut packet, now);
+            self.trace_nat(interface, before_nat, &packet);
         }
         if self
             .device(interface.device)?

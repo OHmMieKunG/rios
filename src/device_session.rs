@@ -81,6 +81,9 @@ pub fn process(
         }
     }
 
+    for record in lab.take_debug(id) {
+        output.push_str(&lab.render_debug(&record));
+    }
     for record in lab.take_trace() {
         output.push_str(&format!(
             "[{}] {} {:?} {:?} {} bytes\n",

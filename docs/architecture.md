@@ -696,3 +696,34 @@ Hosts can also run the existing DHCP server using the shared `ip dhcp pool` and
 excluded-address configuration APIs. They serve routed relay clients without
 acquiring transit-forwarding capability. DHCP remains structured IOS configuration,
 so its pools and options reuse existing rendering, persistence and lease handling.
+
+## Deterministic observability
+
+Device runtime selectors support `debug packet`, `debug arp`, `debug icmp`,
+`debug ip packet`, `debug ip routing`, `debug dhcp`, `debug ospf packet`,
+`debug ospf adjacency`, `debug spanning-tree`, `debug lacp`, `debug nat` and
+`debug bgp`. Matching `undebug`/`no debug` forms and `undebug all` share the CLI
+tree, abbreviation resolver and `do` execution path. `show debugging` reports
+selectors; `show ip traffic` renders real protocol packet/byte/drop counters.
+Debug settings are operational state and are not written into running-config.
+
+Packet records describe actual TX/RX/drop boundaries, including ARP addresses
+and IPv4 source/destination/TTL. Classification reads Ethernet/VLAN and IP
+headers without cloning packet buffers. Counters accumulate even with debugging
+disabled. A received packet subsequently rejected by policy contributes to both
+RX and drop counts. Malformed IPv4/ARP decoding now records an explicit drop.
+
+State topics compare structured state after each event or device configuration
+edit: IPv4 route installation/removal, OSPFv2 neighbor state, BGP FSM state,
+VLAN-scoped STP role/state, LACP partner information and NAT accounting. NAT also
+records actual address/transport-selector rewrites in the forwarding pipeline.
+These are event-boundary observations, not every internal function transition.
+Only selected state topics build snapshots; ordinary simulation does not perform
+route/neighbor diffs. Debugging never schedules events or consumes random values.
+
+Global trace and debug rings each retain at most 4096 records, evicting oldest
+entries. `trace_overflow()` and per-device `debug_overflow()` report evictions.
+`take_debug(device)` drains only that device's records, preserving other sessions'
+records. All frontends use the same structured events and virtual timestamps.
+PCAPNG capture remains independent. Packet counts, delivery timing and protocol
+state are covered by enabled-versus-disabled regression tests.

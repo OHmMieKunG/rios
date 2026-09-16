@@ -91,7 +91,7 @@ impl Lab {
         frame: &EthernetFrame,
     ) -> Result<(), LabError> {
         let Ok(packet) = ArpPacket::decode(&frame.payload) else {
-            return Ok(());
+            return self.packet_drop(interface, frame, DropReason::MalformedPacket);
         };
         if packet.sender_mac != frame.source || packet.sender_mac.is_multicast() {
             return Ok(());

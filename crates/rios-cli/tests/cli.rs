@@ -226,19 +226,24 @@ fn session_navigation_and_isolation() {
     assert_eq!(b.hostname(), "R1");
 }
 #[test]
-fn deferred_features_do_not_fake_success() {
+fn debugging_changes_runtime_selectors_and_network_commands_use_real_requests() {
     let mut device = Device::standalone();
-    let before = device.clone();
+    let before = device.running_config().clone();
     let mut session = CliSession {
         mode: CliMode::PrivilegedExec,
     };
     for input in ["debug packet", "debug arp", "debug icmp"] {
-        assert!(matches!(
-            run(&mut device, &mut session, input),
-            Err(CliError::Unavailable(_))
-        ));
-        assert_eq!(device, before);
+        assert!(
+            run(&mut device, &mut session, input)
+                .unwrap()
+                .output
+                .contains("enabled")
+        );
+        assert_eq!(device.running_config(), &before);
     }
+    assert_eq!(device.debug_topics().len(), 3);
+    run(&mut device, &mut session, "undebug all").unwrap();
+    assert!(device.debug_topics().is_empty());
     assert!(
         run(&mut device, &mut session, "show ip route")
             .unwrap()
@@ -1520,4 +1525,60 @@ fn qos_commands_share_modes_help_no_do_and_structured_replay() {
     }
     assert!(device.running_config().qos.classes.is_empty());
     assert!(device.running_config().qos.policies.is_empty());
+}
+
+#[test]
+fn debug_commands_share_tree_abbreviations_help_and_do() {
+    let mut device = Device::standalone();
+    let mut session = CliSession {
+        mode: CliMode::PrivilegedExec,
+    };
+    for input in [
+        "deb ip pack",
+        "deb ip rout",
+        "deb dhcp",
+        "deb ospf pack",
+        "deb ospf adj",
+        "deb spanning-t",
+        "deb lacp",
+        "deb nat",
+        "deb bgp",
+    ] {
+        assert!(
+            run(&mut device, &mut session, input)
+                .unwrap()
+                .output
+                .contains("enabled")
+        );
+    }
+    assert_eq!(device.debug_topics().len(), 9);
+    assert!(matches!(
+        parse("debug i", session.mode),
+        Err(ParseError::Ambiguous(_))
+    ));
+    let ParsedInput::Help(help) = parse("debug ospf ?", session.mode).unwrap() else {
+        panic!("help");
+    };
+    assert!(help.contains("adjacency") && help.contains("packet"));
+    run(&mut device, &mut session, "no deb ospf adj").unwrap();
+    assert!(
+        !device
+            .debug_topics()
+            .contains(&rios_device::DebugTopic::OspfAdjacency)
+    );
+    run(&mut device, &mut session, "conf t").unwrap();
+    assert!(
+        run(&mut device, &mut session, "do sh debugging")
+            .unwrap()
+            .output
+            .contains("enabled")
+    );
+    assert!(
+        run(&mut device, &mut session, "do sh ip traffic")
+            .unwrap()
+            .output
+            .contains("RX packets")
+    );
+    run(&mut device, &mut session, "do undeb all").unwrap();
+    assert!(device.debug_topics().is_empty());
 }

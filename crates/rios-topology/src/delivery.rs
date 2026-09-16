@@ -230,6 +230,11 @@ impl Lab {
     }
     /// Process one event, advancing simulated time and returning delivery ownership.
     pub fn step(&mut self) -> Result<Option<EventOutcome>, LabError> {
+        let result = self.step_event();
+        self.observe_debug_state();
+        result
+    }
+    fn step_event(&mut self) -> Result<Option<EventOutcome>, LabError> {
         self.purge_pending();
         let Some(scheduled) = self.events.step() else {
             return Ok(None);

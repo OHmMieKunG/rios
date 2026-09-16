@@ -434,3 +434,16 @@ fn dns_inventory_rejects_invalid_and_duplicate_canonical_names() {
     })
     .unwrap();
 }
+
+#[test]
+fn nat_debug_observes_real_address_and_port_rewrites() {
+    let (mut lab, client, _, router) = setup(true);
+    lab.with_device_mut(router, |d| d.set_debug(rios_device::DebugTopic::Nat, true))
+        .unwrap();
+    lab.http_get(client, "203.0.113.2".parse().unwrap(), 80)
+        .unwrap();
+    let records = lab.take_debug(router);
+    assert!(records.iter().any(|record| matches!(&record.event, rios_topology::DebugEvent::NatTranslation { before, after, .. }
+        if before.source.to_string() == "10.0.0.2" && after.source.to_string() == "203.0.113.1" && before.source_selector != after.source_selector)));
+    assert!(records.iter().any(|record| matches!(&record.event, rios_topology::DebugEvent::NatStatistics { before, after } if after.allocations > before.allocations)));
+}

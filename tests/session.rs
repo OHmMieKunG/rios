@@ -378,3 +378,37 @@ fn host_services_are_usable_from_the_lab_cli() {
     assert!(text.contains("NTP stratum 1"));
     assert_eq!(text.matches("Echo reply: 15 bytes").count(), 2, "{text}");
 }
+
+#[test]
+fn device_debug_outputs_real_packets_and_can_be_disabled() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rios"))
+        .args(["lab", "examples/two-routers.yaml"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let input = include_str!("../examples/qos-session.txt")
+        .replace("R1> enable", "enable")
+        .replace(
+            "ping 10.0.0.2",
+            "debug arp\ndebug icmp\nping 10.0.0.2\nshow ip traffic\nundebug all\nshow debugging",
+        );
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("Tx Arp"), "{text}");
+    assert!(text.contains("Rx Icmp"), "{text}");
+    assert!(text.contains("RX packets"), "{text}");
+    assert!(text.contains("All debugging is disabled."), "{text}");
+    assert!(
+        !text.contains("not implemented") && !text.contains("% Invalid"),
+        "{text}"
+    );
+}

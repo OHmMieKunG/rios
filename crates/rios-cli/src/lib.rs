@@ -134,13 +134,6 @@ impl CliSession {
         }
     }
 }
-/// Explicitly deferred network capabilities, never represented as successful traffic.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NetworkFeature {
-    DebugPacket,
-    DebugArp,
-    DebugIcmp,
-}
 /// A validated switch-port spanning-tree setting.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StpPortOption {
@@ -361,7 +354,13 @@ pub enum Command {
     ShowIpNatTranslations,
     SaveConfig,
     Ping(Ipv4Addr),
-    NetworkUnavailable(NetworkFeature),
+    Debug {
+        topic: rios_device::DebugTopic,
+        enabled: bool,
+    },
+    UndebugAll,
+    ShowDebugging,
+    ShowIpTraffic,
     Exit,
     End,
 }

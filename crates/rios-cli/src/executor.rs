@@ -10,8 +10,6 @@ pub enum CliError {
     Device(#[from] DeviceError),
     #[error("command is not available in this mode")]
     WrongMode,
-    #[error("{0} is not implemented yet")]
-    Unavailable(&'static str),
     #[error("configuration line {line}: {message}")]
     Configuration { line: usize, message: String },
 }
@@ -81,6 +79,10 @@ fn executable_after_do(command: &Command) -> bool {
             | Command::ShowIpDhcpBinding
             | Command::ShowIpNatTranslations
             | Command::ShowIpNatStatistics
+            | Command::ShowDebugging
+            | Command::ShowIpTraffic
+            | Command::Debug { .. }
+            | Command::UndebugAll
             | Command::ClearNatTranslations
             | Command::SaveConfig
             | Command::Ping(_)
@@ -275,11 +277,8 @@ pub fn execute_at(
         | Command::ShowIpNatTranslations
         | Command::ShowIpNatStatistics
         | Command::Ping(_) => exec_mode,
-        Command::NetworkUnavailable(feature) => match feature {
-            NetworkFeature::DebugPacket | NetworkFeature::DebugArp | NetworkFeature::DebugIcmp => {
-                mode == PrivilegedExec
-            }
-        },
+        Command::Debug { .. } | Command::UndebugAll => mode == PrivilegedExec,
+        Command::ShowDebugging | Command::ShowIpTraffic => exec_mode,
         Command::Do(command) => config_mode && executable_after_do(command),
         Command::Exit => true,
     };
@@ -836,13 +835,19 @@ pub fn execute_at(
             });
         }
         Command::Ping(address) => result.request = Some(SimulationRequest::Ping(address)),
-        Command::NetworkUnavailable(feature) => {
-            return Err(CliError::Unavailable(match feature {
-                NetworkFeature::DebugPacket => "Packet debugging",
-                NetworkFeature::DebugArp => "ARP debugging",
-                NetworkFeature::DebugIcmp => "ICMP debugging",
-            }));
+        Command::Debug { topic, enabled } => {
+            device.set_debug(topic, enabled);
+            result.output = format!(
+                "{topic:?} debugging {}.\n",
+                if enabled { "enabled" } else { "disabled" }
+            );
         }
+        Command::UndebugAll => {
+            device.undebug_all();
+            result.output = "All debugging is disabled.\n".into();
+        }
+        Command::ShowDebugging => result.output = device.show_debugging(),
+        Command::ShowIpTraffic => result.output = device.show_protocol_counters(),
         Command::End => session.end_configuration(),
         Command::Exit => match mode {
             QosPolicyClassConfiguration(id, _) => session.mode = QosPolicyConfiguration(id),

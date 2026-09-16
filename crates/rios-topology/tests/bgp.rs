@@ -731,3 +731,27 @@ fn received_as_loop_is_rejected_without_resetting_the_session() {
         1
     );
 }
+
+#[test]
+fn bgp_debug_reports_transport_driven_state_transitions() {
+    let mut lab = pair();
+    let r1 = lab.device_id("R1").unwrap();
+    lab.with_device_mut(r1, |d| d.set_debug(rios_device::DebugTopic::Bgp, true))
+        .unwrap();
+    lab.run_until(SimTime::from_millis(5000)).unwrap();
+    let records = lab.take_debug(r1);
+    assert!(records.iter().any(|r| matches!(
+        r.event,
+        rios_topology::DebugEvent::BgpState {
+            after: Some(BgpState::Established),
+            ..
+        }
+    )));
+    assert!(records.iter().any(|r| matches!(
+        r.event,
+        rios_topology::DebugEvent::Packet {
+            protocol: rios_device::PacketProtocol::Bgp,
+            ..
+        }
+    )));
+}

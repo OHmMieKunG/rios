@@ -521,6 +521,10 @@ fn parse_input(
                     | Command::ShowIpDhcpBinding
                     | Command::ShowIpNatTranslations
                     | Command::ShowIpNatStatistics
+                    | Command::ShowDebugging
+                    | Command::ShowIpTraffic
+                    | Command::Debug { .. }
+                    | Command::UndebugAll
                     | Command::ClearNatTranslations
                     | Command::SaveConfig
                     | Command::Ping(_)
@@ -883,9 +887,10 @@ fn parse_input(
         Arp => Command::ShowArp,
         MacTable => Command::ShowMacAddressTable,
         VlanBrief => Command::ShowVlanBrief,
-        DebugPacket => Command::NetworkUnavailable(NetworkFeature::DebugPacket),
-        DebugArp => Command::NetworkUnavailable(NetworkFeature::DebugArp),
-        DebugIcmp => Command::NetworkUnavailable(NetworkFeature::DebugIcmp),
+        Debug(topic, enabled) => Command::Debug { topic, enabled },
+        UndebugAll => Command::UndebugAll,
+        ShowDebugging => Command::ShowDebugging,
+        ShowIpTraffic => Command::ShowIpTraffic,
     };
     Ok(ParsedInput::Command(command))
 }

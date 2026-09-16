@@ -1,4 +1,5 @@
 mod bgp;
+mod observability;
 mod ospfv3;
 mod qos;
 mod route_policy;
@@ -196,9 +197,10 @@ pub(crate) enum Action {
     Ping,
     Exit,
     End,
-    DebugPacket,
-    DebugArp,
-    DebugIcmp,
+    Debug(rios_device::DebugTopic, bool),
+    UndebugAll,
+    ShowDebugging,
+    ShowIpTraffic,
 }
 impl Action {
     pub fn argument_help(self) -> &'static [&'static str] {
@@ -509,13 +511,7 @@ pub(crate) fn tree(mode: CliMode) -> Node {
                     ],
                     Save,
                 );
-                for (word, help, action) in [
-                    ("packet", "Packet debugging", DebugPacket),
-                    ("arp", "ARP debugging", DebugArp),
-                    ("icmp", "ICMP debugging", DebugIcmp),
-                ] {
-                    root.add(&[("debug", "Protocol debugging"), (word, help)], action);
-                }
+                observability::add(&mut root);
             }
         }
         CliMode::GlobalConfiguration

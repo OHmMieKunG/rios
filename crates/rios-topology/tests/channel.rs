@@ -285,3 +285,32 @@ links:
     })
     .unwrap();
 }
+
+#[test]
+fn lacp_and_spanning_tree_debug_report_actual_state_changes() {
+    let mut lab = setup("router");
+    let a = lab.device_id("A").unwrap();
+    lab.with_device_mut(a, |d| d.set_debug(rios_device::DebugTopic::Lacp, true))
+        .unwrap();
+    configure_lacp(&mut lab, "A", ChannelMode::Active);
+    configure_lacp(&mut lab, "B", ChannelMode::Passive);
+    lab.run_until(SimTime::from_millis(100)).unwrap();
+    assert!(lab.take_debug(a).iter().any(|r| matches!(
+        r.event,
+        rios_topology::DebugEvent::Lacp { after: Some(_), .. }
+    )));
+    let mut lab = setup("switch");
+    let a = lab.device_id("A").unwrap();
+    lab.with_device_mut(a, |d| {
+        d.set_debug(rios_device::DebugTopic::SpanningTree, true)
+    })
+    .unwrap();
+    lab.run_until(SimTime::from_millis(31000)).unwrap();
+    assert!(lab.take_debug(a).iter().any(|r| matches!(
+        r.event,
+        rios_topology::DebugEvent::SpanningTree {
+            after: Some((_, rios_switching::StpPortState::Forwarding)),
+            ..
+        }
+    )));
+}

@@ -25,7 +25,11 @@ pub struct Lab {
     pub(crate) ports: BTreeMap<InterfaceRef, LinkId>,
     pub(crate) events: EventQueue<SimulationEvent>,
     pub(crate) tracing: bool,
-    pub(crate) trace: Vec<TraceRecord>,
+    pub(crate) trace: std::collections::VecDeque<TraceRecord>,
+    pub(crate) trace_overflow: u64,
+    pub(crate) debug_snapshots: BTreeMap<DeviceId, crate::observability::DebugSnapshot>,
+    pub(crate) debug_records: std::collections::VecDeque<DebugRecord>,
+    pub(crate) debug_overflow: BTreeMap<DeviceId, u64>,
     pub(crate) next_ping_id: u16,
     pub(crate) pending_ipv4: Vec<PendingIpv4>,
     pub(crate) ospf_generations: BTreeMap<DeviceId, u64>,
@@ -259,6 +263,7 @@ impl Lab {
         self.schedule_lacp(id)?;
         self.schedule_stp_now(id)?;
         self.schedule_dhcp_now(id)?;
+        self.observe_device_state(id);
         Ok(())
     }
     /// Stable lab names in sorted order.
@@ -321,9 +326,10 @@ impl Lab {
         self.schedule_bgp_now(id)?;
         self.schedule_stp_now(id)?;
         self.schedule_dhcp_now(id)?;
+        self.observe_device_state(id);
         Ok(result)
     }
-    /// Current virtual time in milliseconds.
+    /// Current virtual time, stored as integer microseconds.
     pub fn now(&self) -> SimTime {
         self.events.now()
     }
@@ -576,7 +582,7 @@ impl Lab {
     }
     /// Drain collected metadata so frontends control trace retention.
     pub fn take_trace(&mut self) -> Vec<TraceRecord> {
-        std::mem::take(&mut self.trace)
+        self.trace.drain(..).collect()
     }
     pub(crate) fn trace_frame(
         &mut self,
@@ -585,8 +591,13 @@ impl Lab {
         frame: &EthernetFrame,
     ) {
         self.capture_frame(interface, action, frame);
+        self.observe_packet(interface, action, frame);
         if self.tracing {
-            self.trace.push(TraceRecord {
+            if self.trace.len() == crate::observability::TRACE_LIMIT {
+                self.trace.pop_front();
+                self.trace_overflow = self.trace_overflow.saturating_add(1);
+            }
+            self.trace.push_back(TraceRecord {
                 time: self.now(),
                 interface,
                 action,
